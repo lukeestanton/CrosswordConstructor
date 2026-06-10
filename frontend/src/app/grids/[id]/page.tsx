@@ -361,6 +361,10 @@ export default function GridEditorPage() {
                   dispatch({ type: "click", r, c });
                   gridRef.current?.focus();
                 }}
+                onCellDoubleClick={(r, c) => {
+                  dispatch({ type: "dblclick", r, c });
+                  gridRef.current?.focus();
+                }}
               />
               {rebusOpen && (
                 <input

@@ -60,6 +60,20 @@ test("period places a block with its rotational twin; undo removes both", async 
   await expect(blocks).toHaveCount(0);
 });
 
+test("blocks survive a single click; double-click removes the pair", async ({
+  page,
+}) => {
+  const surface = await openEditor(page);
+  const blocks = page.locator("svg[role=application] rect[class*=block]");
+  for (let i = 0; i < 4; i++) await surface.press("ArrowLeft");
+  await surface.press("Period");
+  await expect(blocks).toHaveCount(2);
+  await blocks.first().click();
+  await expect(blocks).toHaveCount(2); // single click is inert
+  await blocks.first().dblclick();
+  await expect(blocks).toHaveCount(0);
+});
+
 test("enter moves focus to the clue field; esc returns to the grid", async ({
   page,
 }) => {

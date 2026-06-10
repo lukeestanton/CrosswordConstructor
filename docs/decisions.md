@@ -108,7 +108,10 @@ accessibility.
   slot; otherwise they move. A pure toggle + orientation-snap would trap the
   cursor in single-orientation cells.
 - *Block removal*: the cursor can never sit on a block, so period only places
-  blocks; clicking a block removes it (with twins), undo is the keyboard path.
+  blocks; **double-clicking** a block removes it (with twins), undo is the
+  keyboard path. (2026-06-10: originally single click — accidental clicks near
+  existing blocks kept destroying them, so removal now requires a deliberate
+  dblclick; single-clicking a block is a no-op. Spec updated to match.)
 - *Rebus keystroke*: Insert (Esc is taken by "return from clue editor");
   also a button in the stats line.
 - *Lock*: ⌘/Ctrl+L toggles the active slot's lock; only complete slots lock.

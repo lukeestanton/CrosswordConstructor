@@ -335,16 +335,32 @@ describe("mouse click", () => {
     expect(next.cursor.orient).toBe("down");
   });
 
-  it("clicking a block removes it (with twins) — the mouse path out of block state", () => {
+  it("single-clicking a block does nothing — removal is dblclick-only", () => {
     const state = withCursor(
       grid(["#..", "...", "..#"], { symmetry: "rotational" }),
       1,
       1,
     );
     const next = run(state, { type: "click", r: 0, c: 0 });
+    expect(next).toBe(state);
+  });
+
+  it("double-clicking a block removes it (with twins) — the mouse path out of block state", () => {
+    const state = withCursor(
+      grid(["#..", "...", "..#"], { symmetry: "rotational" }),
+      1,
+      1,
+    );
+    const next = run(state, { type: "dblclick", r: 0, c: 0 });
     expect(valueAt(next, 0, 0)).toBe("");
     expect(valueAt(next, 2, 2)).toBe("");
     expect(next.cursor).toMatchObject({ r: 0, c: 0 });
+  });
+
+  it("double-clicking a letter cell does nothing", () => {
+    const state = withCursor(grid(["...", "...", "..."]), 1, 1);
+    const next = run(state, { type: "dblclick", r: 0, c: 0 });
+    expect(next).toBe(state);
   });
 });
 
