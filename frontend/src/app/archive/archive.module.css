@@ -1,0 +1,100 @@
+.page {
+  max-width: 52rem;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.syncButton {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  border: 1px solid var(--ink);
+  padding: var(--sp-1) var(--sp-3);
+}
+
+.syncButton:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.syncButton:disabled {
+  opacity: 0.5;
+}
+
+.syncNote {
+  margin-top: var(--sp-2);
+  color: var(--ink-muted);
+  font-size: var(--fs-xs);
+}
+
+.recs {
+  margin-top: var(--sp-5);
+  padding: var(--sp-3) 0;
+  border-top: var(--rule-ink);
+  border-bottom: var(--rule-hair);
+}
+
+.recList {
+  list-style: none;
+  margin-top: var(--sp-2);
+}
+
+.recRow {
+  display: flex;
+  gap: var(--sp-4);
+  align-items: baseline;
+  padding: var(--sp-1) 0;
+}
+
+.recReasons {
+  color: var(--ink-muted);
+  font-size: var(--fs-s);
+}
+
+.list {
+  list-style: none;
+  margin-top: var(--sp-4);
+  border-top: var(--rule-hair);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 8rem 6rem 4.5rem minmax(0, 1fr) auto;
+  gap: var(--sp-3);
+  align-items: baseline;
+  padding: var(--sp-2) 0;
+  border-bottom: var(--rule-hair);
+}
+
+.solveMark {
+  color: var(--accent);
+}
+
+.rating {
+  color: var(--ink-muted);
+}
+
+.difficulty {
+  font-style: italic;
+  color: var(--ink-muted);
+  font-size: var(--fs-s);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.digestMark {
+  font-size: 0.65rem;
+}
+
+.empty {
+  margin-top: var(--sp-5);
+  font-style: italic;
+  color: var(--ink-muted);
+  max-width: 36rem;
+}
