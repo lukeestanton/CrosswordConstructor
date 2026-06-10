@@ -1,0 +1,64 @@
+.masthead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  max-width: 76rem;
+  margin: 0 auto;
+  padding: var(--sp-5) var(--sp-6) var(--sp-3);
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-l);
+  letter-spacing: 0.02em;
+  font-variant: small-caps;
+}
+
+.nav {
+  display: flex;
+  gap: var(--sp-6);
+}
+
+.navItem {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+}
+
+/* The reference-work double rule under the masthead. */
+.doubleRule {
+  max-width: 76rem;
+  margin: 0 auto;
+  border-top: 2.5px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  height: 3px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@media (max-width: 76rem) {
+  .doubleRule {
+    margin-left: var(--sp-6);
+    margin-right: var(--sp-6);
+  }
+}
+
+.main {
+  max-width: 76rem;
+  margin: 0 auto;
+  padding: var(--sp-5) var(--sp-6) var(--sp-8);
+}
+
+@media (max-width: 48rem) {
+  .masthead,
+  .main {
+    padding-left: var(--sp-4);
+    padding-right: var(--sp-4);
+  }
+
+  .nav {
+    gap: var(--sp-4);
+  }
+}

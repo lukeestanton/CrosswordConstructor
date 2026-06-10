@@ -46,3 +46,42 @@ the cloud/web environment.
 **Health endpoints.** `/health` (process + whether LLM is configured) and
 `/health/db` (connection + FTS5 + sqlite-vec). These double as slice-1
 acceptance tests and the CI smoke check.
+
+## 2026-06-10 — Slice 2: corpus + clue search + entry page
+
+**Spec location.** `SPEC.md` moved to `docs/grid-editor-spec.md` so reality
+matches the path CLAUDE.md promises; specs live together in `docs/`.
+
+**`.xd` files as the corpus source of truth** (not the derived `clues.tsv`):
+only the per-puzzle files carry clue→exact-date linkage, which the entry
+page's dated citations and first/last-seen stats need. Metadata tsv joins in
+canonical dates/titles when present; `.xd` headers and the xdid itself are
+fallbacks. Parser is deliberately tolerant — bad files are skipped and
+reported, never abort a 280MB run. `--limit`/`--dry-run` for first smoke runs.
+
+**FTS5 with raw DDL, no sync triggers, porter stemming.** SQLAlchemy can't
+model virtual tables, so the migration runs `CREATE VIRTUAL TABLE` directly.
+Ingestion is the only writer of `clues` and ends with a full FTS rebuild —
+simpler and faster than trigger upkeep. Porter tokenizer so "needle" finds
+"needles": clue search wants recall.
+
+**Sense grouping: normalized-text identity, no LLM, no clustering (v1).**
+A "sense" is the set of citations sharing a normalized clue text, ranked by
+count. Honest and cheap; embedding-based clustering can come later behind the
+same API shape. Likewise **no invented pronunciation** — the mockup's IPA slot
+renders the real V·C pattern instead; fake etymology would poison the
+"quietly authoritative" register.
+
+**Type faces** (the deliberate choice CLAUDE.md asks for): Libre Caslon Text
+for headwords/display (the classic dictionary serif), Source Serif 4
+(variable) for body, IBM Plex Mono for data — all via `@fontsource` npm
+packages, self-hosted, no font CDN. Palette tokens in
+`frontend/src/styles/tokens.css` are the only color values in the system.
+
+**API topology.** Client components fetch `/api/*` through a Next rewrite to
+FastAPI (`next.config.ts`); server components hit `BACKEND_URL` directly.
+One origin in the browser, no CORS surface.
+
+**Register/familiarity lines are derived, not editorial**: familiarity buckets
+the wordlist score; "crosswordese" = ≥100 appearances with score <60;
+"classic" = ≥50 appearances. Heuristics, tunable in `services/entry_stats.py`.
