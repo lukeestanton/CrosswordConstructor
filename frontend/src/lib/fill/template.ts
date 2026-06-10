@@ -28,6 +28,20 @@ export function slotToEngine(slot: Slot): { x: number; y: number; down: boolean 
   return { x: slot.cells[0].c, y: slot.cells[0].r, down: slot.orient === "down" };
 }
 
+/** The template with `word` written into `slot` — the candidate-verification
+ * probe ("would this grid still be fillable?"). Same rebus-first-letter rule
+ * as gridToTemplate. */
+export function templateWithWord(template: string, slot: Slot, word: string): string {
+  const rows = template.split("\n").map((row) => row.split(""));
+  slot.cells.forEach((pos, i) => {
+    const ch = word[i];
+    if (ch && rows[pos.r]?.[pos.c] !== undefined) {
+      rows[pos.r][pos.c] = ch.toLowerCase();
+    }
+  });
+  return rows.map((row) => row.join("")).join("\n");
+}
+
 /** Diff an autofill result grid back into per-cell writes for empty,
  * unlocked letter cells (applyFill skips locked ones anyway — belt and
  * suspenders). */

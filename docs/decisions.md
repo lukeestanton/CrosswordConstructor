@@ -108,7 +108,10 @@ accessibility.
   slot; otherwise they move. A pure toggle + orientation-snap would trap the
   cursor in single-orientation cells.
 - *Block removal*: the cursor can never sit on a block, so period only places
-  blocks; clicking a block removes it (with twins), undo is the keyboard path.
+  blocks; **double-clicking** a block removes it (with twins), undo is the
+  keyboard path. (2026-06-10: originally single click — accidental clicks near
+  existing blocks kept destroying them, so removal now requires a deliberate
+  dblclick; single-clicking a block is a no-op. Spec updated to match.)
 - *Rebus keystroke*: Insert (Esc is taken by "return from clue editor");
   also a button in the stats line.
 - *Lock*: ⌘/Ctrl+L toggles the active slot's lock; only complete slots lock.
@@ -167,6 +170,38 @@ English constantly.
 **Slot history panel** reuses the entry page's sense grouping server-side
 (same `build_senses`), trimmed to 6 senses × 3 citations, fetched on 250ms
 cursor idle and cached per answer.
+
+## 2026-06-10 — Grid editor: verification, expandable lists, block dblclick
+
+**Candidate verification = a real fill search per candidate.** Arc
+consistency (the candidates filter) is pairwise and only propagates dupe
+rules from singleton slots, so words that globally kill the grid still pass
+it. `check_fillable` in fill-wasm substitutes the candidate into the template
+and runs `find_fill` with a 250ms budget; only a proven `HardFailure` marks a
+row "unfillable" — a timeout verdicts "unknown" and renders as unverified,
+never as dead. Runs on a **dedicated second worker** (one extra dict parse at
+boot, lazy) so it never queues behind autofill or delays the candidates a
+keystroke just requested; cancellation is a generation counter, not worker
+termination (terminate would re-parse the 314k dict on every cursor move).
+Verdicts cache by `cutoff|substituted-template` (encodes grid+slot+word),
+cap 2,000. Dead rows dim/strike and sink below live ones, still clickable —
+the verdict is advice, not a gate. Cost: doubled wasm memory (two WordLists);
+fallback if it ever bites is sequencing checks on the main worker.
+
+**List expansion by paging, not virtualization.** The wasm reports the true
+viable total alongside each page (`{total, items}`); the panel starts at 40
+rows and expands +200 per click, re-requesting (one slot-options +
+arc-consistency pass, off-thread — keystroke-update cost class). No
+virtualization dependency; the DOM only ever holds what was asked for, so
+the spec's "list lags, keystroke never" rule stays trivially true.
+Clue-history senses likewise: `GET /api/clue-intel/{answer}` takes
+`limit`/`citations` (0 = all, defaults unchanged at 6×3); the panel shows 4
+and refetches untrimmed on first expansion.
+
+**Word-type filtering (exclude proper nouns etc. from candidates/autofill)
+is designed but deferred** — full design, including the open tag-source
+decision (LLM batch ≈ $10 one-time, recommended) in
+`docs/word-type-filters.md`.
 
 ## 2026-06-10 — Slice 6: solver side
 

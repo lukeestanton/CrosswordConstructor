@@ -2,7 +2,7 @@
 
 /** The grid as a drafting-instrument object: SVG with hairline strokes, crop
  * marks, mono coordinates. Pure render of GridState + derived data — all
- * interaction is delegated upward via onCellClick.
+ * interaction is delegated upward via onCellClick / onCellDoubleClick.
  */
 
 import { memo } from "react";
@@ -25,9 +25,15 @@ interface Props {
   state: GridState;
   flags?: CellFlags;
   onCellClick: (r: number, c: number) => void;
+  onCellDoubleClick: (r: number, c: number) => void;
 }
 
-export const GridSvg = memo(function GridSvg({ state, flags, onCellClick }: Props) {
+export const GridSvg = memo(function GridSvg({
+  state,
+  flags,
+  onCellClick,
+  onCellDoubleClick,
+}: Props) {
   const { width: w, height: h, cells, cursor } = state;
   const derived = slotsOf(state);
   const active = activeSlot(state);
@@ -104,7 +110,9 @@ export const GridSvg = memo(function GridSvg({ state, flags, onCellClick }: Prop
               width={CELL}
               height={CELL}
               className={styles.block}
-              onClick={() => onCellClick(r, c)}
+              // Removal is deliberately dblclick-only; letter cells keep
+              // instant single-click since their semantics don't conflict.
+              onDoubleClick={() => onCellDoubleClick(r, c)}
             />
           );
         }

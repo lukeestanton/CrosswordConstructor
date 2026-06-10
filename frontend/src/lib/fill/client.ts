@@ -25,12 +25,22 @@ export interface Candidate {
   score: number;
 }
 
+export interface CandidatesResult {
+  /** Total viable candidates before the limit — the UI shows "N of total". */
+  total: number;
+  items: Candidate[];
+}
+
 export interface FillResult {
   ok: boolean;
   grid?: string | null;
   reason?: string | null;
   contested: SlotReport[];
 }
+
+/** "unfillable" is a proof; "unknown" (timeout / budget) must render exactly
+ * like unverified — never strike a candidate on suspicion. */
+export type FillVerdict = "fillable" | "unfillable" | "unknown";
 
 interface Pending {
   resolve: (v: unknown) => void;
@@ -41,17 +51,24 @@ export class FillClient {
   private worker: Worker | null = null;
   private dict: string | null = null;
   private pending = new Map<number, Pending>();
+  /** Dedicated verification worker: candidate fill-tests must neither block
+   * behind a long autofill nor delay the candidates the user just typed for —
+   * and cancel() must stay free to terminate the main worker without
+   * re-parsing costs landing on the verify path. */
+  private verifyWorker: Worker | null = null;
+  private verifyPending = new Map<number, Pending>();
+  private verifyReady: Promise<void> | null = null;
   private nextId = 1;
   /** Words loaded, set after init. */
   wordCount = 0;
 
-  private spawn(): Worker {
+  private spawn(pending: Map<number, Pending>): Worker {
     const worker = new Worker("/fill/worker.js");
     worker.onmessage = (e) => {
       const { id, ok, result, error } = e.data;
-      const entry = this.pending.get(id);
+      const entry = pending.get(id);
       if (!entry) return;
-      this.pending.delete(id);
+      pending.delete(id);
       if (ok) entry.resolve(result);
       else entry.reject(new Error(error));
     };
@@ -59,12 +76,46 @@ export class FillClient {
   }
 
   private request<T>(op: string, args: Record<string, unknown>): Promise<T> {
-    if (!this.worker) this.worker = this.spawn();
+    if (!this.worker) this.worker = this.spawn(this.pending);
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (v: unknown) => void, reject });
       this.worker!.postMessage({ id, op, args });
     });
+  }
+
+  private verifyRequest<T>(op: string, args: Record<string, unknown>): Promise<T> {
+    if (!this.verifyWorker) this.verifyWorker = this.spawn(this.verifyPending);
+    const id = this.nextId++;
+    return new Promise<T>((resolve, reject) => {
+      this.verifyPending.set(id, { resolve: resolve as (v: unknown) => void, reject });
+      this.verifyWorker!.postMessage({ id, op, args });
+    });
+  }
+
+  /** Lazy boot of the verify worker from the already-fetched dict text (one
+   * extra parse, off the first-candidates critical path). */
+  private ensureVerifyReady(): Promise<void> {
+    if (!this.verifyReady) {
+      if (this.dict === null) return Promise.reject(new Error("init() first"));
+      this.verifyReady = this.verifyRequest<number>("init", { dict: this.dict })
+        .then(() => undefined)
+        .catch((err) => {
+          this.verifyReady = null;
+          throw err;
+        });
+    }
+    return this.verifyReady;
+  }
+
+  private resetVerifyWorker(): void {
+    this.verifyWorker?.terminate();
+    this.verifyWorker = null;
+    this.verifyReady = null;
+    for (const [, entry] of this.verifyPending) {
+      entry.reject(new Error("verify worker reset"));
+    }
+    this.verifyPending.clear();
   }
 
   /** Fetch the wordlist and initialize the engine. Idempotent. */
@@ -87,8 +138,8 @@ export class FillClient {
     minScore: number,
     slot: { x: number; y: number; down: boolean },
     limit = 60,
-  ): Promise<Candidate[]> {
-    return this.request<Candidate[]>("candidates", {
+  ): Promise<CandidatesResult> {
+    return this.request<CandidatesResult>("candidates", {
       template,
       minScore,
       x: slot.x,
@@ -102,8 +153,43 @@ export class FillClient {
     return this.request<FillResult>("autofill", { template, minScore, timeoutMs });
   }
 
-  /** Kill any in-flight work (autofill cancel). Pending promises reject;
-   * the next request spawns a fresh worker and re-inits from cache. */
+  /** Candidate verification probe, routed to the dedicated verify worker.
+   * Resolves "unknown" on any worker trouble — verification is advisory and
+   * must never surface errors into the editor. A watchdog terminates a wedged
+   * worker (find_fill's own timeout is the expected bound; this is backstop). */
+  async checkFillable(
+    template: string,
+    minScore: number,
+    timeoutMs: number,
+  ): Promise<FillVerdict> {
+    try {
+      await this.ensureVerifyReady();
+    } catch {
+      return "unknown";
+    }
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    const wedged = new Promise<FillVerdict>((resolve) => {
+      watchdog = setTimeout(() => {
+        this.resetVerifyWorker();
+        resolve("unknown");
+      }, timeoutMs + 2000);
+    });
+    const check = this.verifyRequest<FillVerdict>("checkFillable", {
+      template,
+      minScore,
+      timeoutMs,
+    }).catch(() => "unknown" as FillVerdict);
+    try {
+      return await Promise.race([check, wedged]);
+    } finally {
+      clearTimeout(watchdog);
+    }
+  }
+
+  /** Kill any in-flight work on the MAIN worker (autofill cancel). Pending
+   * promises reject; the next request spawns a fresh worker and re-inits from
+   * cache. The verify worker is untouched — its checks are short-lived and
+   * terminate-to-cancel would re-parse the dict constantly. */
   async cancel(): Promise<void> {
     if (this.worker) {
       this.worker.terminate();
@@ -122,5 +208,9 @@ export class FillClient {
     this.worker?.terminate();
     this.worker = null;
     this.pending.clear();
+    this.verifyWorker?.terminate();
+    this.verifyWorker = null;
+    this.verifyReady = null;
+    this.verifyPending.clear();
   }
 }

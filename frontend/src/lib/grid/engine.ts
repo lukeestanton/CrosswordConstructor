@@ -10,8 +10,9 @@
  *  - A perpendicular arrow toggles orientation only when the cell actually has
  *    a crossing slot; otherwise it moves — pure toggle-then-snap would trap
  *    the cursor in single-orientation cells.
- *  - Blocks are removed by clicking them (cursor can never sit on one) or by
- *    undo; period only places blocks.
+ *  - Blocks are removed by double-clicking them (cursor can never sit on one)
+ *    or by undo; period only places blocks. Single-clicking a block does
+ *    nothing — single-click removal made mis-clicks destructive.
  */
 
 import {
@@ -45,6 +46,7 @@ export type Action =
   | { type: "tab"; back: boolean }
   | { type: "toggleBlock" }
   | { type: "click"; r: number; c: number }
+  | { type: "dblclick"; r: number; c: number }
   | { type: "setRebus"; value: string }
   | { type: "toggleCircle" }
   | { type: "toggleLockSlot" }
@@ -406,14 +408,22 @@ function click(state: GridState, r: number, c: number): GridState {
   if (!inBounds(state, r, c)) return state;
   const cell = at(state, r, c);
   if (cell.kind === "block") {
-    // The cursor can never sit on a block, so the mouse is the direct way to
-    // remove one (with its symmetry twins). Undo restores it.
-    return removeBlockAt(state, r, c);
+    // Single click never removes a block — that's dblclick's job.
+    return state;
   }
   if (state.cursor.r === r && state.cursor.c === c) {
     return toggleOrientation(state);
   }
   return moveCursor(state, r, c);
+}
+
+function dblclick(state: GridState, r: number, c: number): GridState {
+  if (!inBounds(state, r, c)) return state;
+  // The cursor can never sit on a block, so the mouse is the direct way to
+  // remove one (with its symmetry twins). Undo restores it. On letter cells
+  // the two preceding click events already did the work.
+  if (at(state, r, c).kind !== "block") return state;
+  return removeBlockAt(state, r, c);
 }
 
 function setRebus(state: GridState, value: string): GridState {
@@ -540,6 +550,8 @@ export function reduce(state: GridState, action: Action): GridState {
       return toggleBlock(state);
     case "click":
       return click(state, action.r, action.c);
+    case "dblclick":
+      return dblclick(state, action.r, action.c);
     case "setRebus":
       return setRebus(state, action.value);
     case "toggleCircle":

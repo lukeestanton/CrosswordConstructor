@@ -64,7 +64,14 @@ def batch_entry_stats(
 
 
 @router.get("/{answer}")
-def entry_intel(answer: str, session: Session = Depends(get_session)) -> dict:
+def entry_intel(
+    answer: str,
+    limit: int = 6,
+    citations: int = 3,
+    session: Session = Depends(get_session),
+) -> dict:
+    """Per-answer history. `limit`/`citations` trim senses and citations per
+    sense; zero or negative means "all" (the editor's expandable view)."""
     normalized = re.sub(r"[^A-Z]", "", answer.upper())
     if not normalized:
         raise HTTPException(status_code=404, detail="not a word")
@@ -108,9 +115,9 @@ def entry_intel(answer: str, session: Session = Depends(get_session)) -> dict:
                         "publication": c.publication,
                         "clue_text": c.clue_text,
                     }
-                    for c in s.citations[:3]
+                    for c in (s.citations[:citations] if citations > 0 else s.citations)
                 ],
             }
-            for s in senses[:6]
+            for s in (senses[:limit] if limit > 0 else senses)
         ],
     }

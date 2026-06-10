@@ -32,6 +32,18 @@ def test_entry_intel(client):
     assert len(data["senses"][0]["citations"]) <= 3
 
 
+def test_entry_intel_limit_params(client):
+    default = client.get("/api/clue-intel/ETUI").json()
+    one = client.get("/api/clue-intel/ETUI?limit=1").json()
+    full = client.get("/api/clue-intel/ETUI?limit=0&citations=0").json()
+    assert len(one["senses"]) == 1
+    # limit=0 means "all": never fewer than the default trim returns.
+    assert len(full["senses"]) >= len(default["senses"])
+    assert len(full["senses"][0]["citations"]) >= len(
+        default["senses"][0]["citations"]
+    )
+
+
 def test_entry_intel_unknown_word(client):
     r = client.get("/api/clue-intel/QQQQQ")
     assert r.status_code == 200

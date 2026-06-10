@@ -31,7 +31,7 @@ These semantics are the soul of the editor. Every one of them must be honored ex
 | Space | Toggle orientation in place. |
 | Tab / Shift+Tab | Jump to the first empty cell of the next / previous incomplete slot, in numbering order, wrapping at the ends. If all slots are complete, cycle through slots in numbering order. |
 | Period ( . ) | Toggle block at the active cell, applying symmetry twins. Toggling a block that would orphan letters (letters in the twin cell) clears those letters — with undo as the safety net, not a confirmation dialog. After placing a block, the cursor moves to the next cell in the active orientation. |
-| Mouse click | Click selects the cell. Clicking the already-active cell toggles orientation. |
+| Mouse click | Click selects the cell. Clicking the already-active cell toggles orientation. Double-clicking a block removes it (with symmetry twins); single-clicking a block does nothing. |
 | Enter | Open the clue field for the active slot (focus moves to the clue editor; Esc returns focus to the grid at the same cell). |
 | Undo / Redo (standard shortcuts) | Every grid mutation — letters, blocks, locks, symmetry edits, autofill results, resizes — is undoable in one consistent history. Undo of an autofill reverts the entire fill as one step. |
 

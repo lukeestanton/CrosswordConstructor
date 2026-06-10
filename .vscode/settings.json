@@ -1,5 +1,5 @@
 {
-    "python.languageServer": "Default",
+    "python.languageServer": "None",
     "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
     "python.analysis.extraPaths": ["backend"]
 }
