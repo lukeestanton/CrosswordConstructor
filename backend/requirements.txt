@@ -1,0 +1,19 @@
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Settings / env
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# Database (SQLite owned by this layer)
+SQLAlchemy==2.0.36
+alembic==1.14.0
+sqlite-vec==0.1.6          # vector search extension (replaces pgvector)
+
+# LLM features (digests, clue assistance) — key read from env, degrades if absent
+anthropic==0.42.0
+
+# Dev / test
+pytest==8.3.4
+httpx==0.28.1              # FastAPI TestClient dependency

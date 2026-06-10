@@ -10,7 +10,7 @@ The constructor suite is the heart and is built first. The grid editor's behavio
 
 - **Frontend**: Next.js + React + TypeScript.
 - **Data/ML backend**: Python + FastAPI — ingestion pipelines (xd clue corpus, Reddit threads, Rex Parker, NYT solve history), embeddings, search endpoints.
-- **Database**: Postgres with full-text search and pgvector. One database, owned by the Python layer.
+- **Database**: SQLite, owned by the Python layer. Full-text search via the built-in FTS5 extension; vector search via `sqlite-vec`. One database file. (Chosen over Postgres for a single-user local tool — zero-ops, single file, trivial backup; see `docs/decisions.md`. Revisit if concurrency or hosted multi-user ever becomes a goal.)
 - **Fill engine**: `ingrid_core` (open-source Rust crate). Preferred hosting is in-browser via WASM; a server-side fallback behind FastAPI is acceptable if WASM integration fights back. Do not write a fill engine from scratch.
 - **LLM features** (digests, clue assistance): Anthropic API, key in env. Every LLM call site must have a token budget and must degrade gracefully when the key is absent.
 
@@ -47,3 +47,9 @@ The visual identity borrows the typographic system of serious reference works (M
 ## Working style
 
 Luke reviews everything and cares about feel as much as function. When a behavior or visual choice is ambiguous *and consequential*, present the options briefly with a recommendation instead of silently picking. For everything reversible, just decide. When a slice is done, summarize what was built, what was decided along the way, and what you'd flag for review — especially anywhere you deviated from the spec or this file.
+
+
+.env has:
+TIMES_COOKIE=...
+POLL_ARCHIVE_URL=...
+

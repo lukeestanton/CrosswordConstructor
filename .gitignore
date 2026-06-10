@@ -1,1 +1,29 @@
+# Secrets
 .env
+.env.local
+
+# Data: large downloaded corpora + the generated SQLite db live here.
+# Big regenerable zips are fetched via backend/scripts/fetch_data.py, not committed.
+# The 4MB word list IS committed (small, unstable upstream URL).
+backend/data/**
+!backend/data/spread_word_list/
+!backend/data/spread_word_list/spreadthewordlist_caps.dict
+
+# Python
+backend/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.db
+*.db-wal
+*.db-shm
+
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
