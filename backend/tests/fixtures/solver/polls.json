@@ -1,0 +1,29 @@
+[
+  {
+    "date": "2026-06-01",
+    "average": 4.6,
+    "votes": 212,
+    "distribution": {"1": 4, "2": 9, "3": 28, "4": 71, "5": 100}
+  },
+  {
+    "date": "2026-06-02",
+    "average": 2.9,
+    "votes": 154,
+    "distribution": {"1": 22, "2": 41, "3": 52, "4": 26, "5": 13},
+    "thread_url": "https://example.com/poll/2026-06-02"
+  },
+  {
+    "date": "2026-06-07",
+    "votes": 88
+  },
+  {
+    "date": "yesterday-ish",
+    "average": 3.2,
+    "votes": 51
+  },
+  {
+    "average": 4.9,
+    "votes": 7
+  },
+  "not even an object"
+]

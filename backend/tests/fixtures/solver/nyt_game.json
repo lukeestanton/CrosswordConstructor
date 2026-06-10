@@ -1,0 +1,15 @@
+{
+  "puzzleID": 21801,
+  "lastCommitID": "9f2c4ab1",
+  "minGuessTime": 1780300000,
+  "calcs": {
+    "percentFilled": 100,
+    "secondsSpentSolving": 612,
+    "solved": true
+  },
+  "firsts": {
+    "opened": 1780300000,
+    "solved": 1780300612
+  },
+  "timestamp": "1780300612"
+}

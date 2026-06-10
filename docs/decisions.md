@@ -167,3 +167,32 @@ English constantly.
 **Slot history panel** reuses the entry page's sense grouping server-side
 (same `build_senses`), trimmed to 6 senses × 3 citations, fetched on 250ms
 cursor idle and cached per answer.
+
+## 2026-06-10 — Slice 6: solver side
+
+**Every pipeline is fixture-tested, no network in tests** (httpx.MockTransport
+throughout) — the sandbox can't reach NYT/Reddit/Rex anyway, and CLAUDE.md
+wants pipelines fixture-based. Real runs: `scripts/sync_solver.py` on the
+local machine, incremental and idempotent, cron-friendly.
+
+**Cookie containment**: the NYT-S cookie exists in exactly one function
+(`make_nyt_client`), which also installs a request hook refusing any
+non-nytimes.com host before the transport sees it. Tests walk exception
+chains and log records asserting the cookie never leaks; sync errors carry
+the exception class name only.
+
+**Spoiler contract, tightened**: the digest prompt receives only date,
+weekday, constructor/title/editor from NYT metadata, poll average + votes,
+and Rex's relative-difficulty word. The Rex post *title* was dropped from the
+prompt after review — Rex titles quote clues verbatim. Enforced by tests that
+plant marker strings in forbidden places. Budget: max_tokens=400, one call
+per date ever (cached with token counts).
+
+**Recommendations are one SQL query** (unsolved, by poll rating then
+recency) with human-readable reasons. No ML — revisit when there's enough
+personal solve history to learn from.
+
+**sqlite-vec remains wired but unused**: embeddings have no provider here
+(Anthropic has no embeddings API) and FTS5 + sense grouping cover today's
+search needs. The capability stays verified at startup for when a use
+arrives (clue-similarity clustering is the obvious candidate).
