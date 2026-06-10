@@ -14,3 +14,9 @@ API-compatible shim that ingrid_core already depends on, with its
 Wired up via `[patch.crates-io]` in `rust/fill-wasm/Cargo.toml`. Drop this
 directory and the patch entry if a future upstream release fixes wasm
 support.
+
+Also stripped from the published crate (we consume the library only):
+`src/bin.rs` + its `[[bin]]` target and `resources/spreadthewordlist.dict`
+(4MB — the same list is already committed at
+`backend/data/spread_word_list/`). The crate's own test suite references
+these; it isn't built when ingrid_core is consumed as a dependency.

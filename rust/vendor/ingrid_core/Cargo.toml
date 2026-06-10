@@ -37,10 +37,6 @@ codegen-units = 1
 name = "ingrid_core"
 path = "src/lib.rs"
 
-[[bin]]
-name = "ingrid_core"
-path = "src/bin.rs"
-
 [dependencies.clap]
 version = "4.0.15"
 features = ["derive"]
