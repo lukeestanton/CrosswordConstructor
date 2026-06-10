@@ -51,6 +51,9 @@ test("period places a block with its rotational twin; undo removes both", async 
   const surface = await openEditor(page);
   const blocks = page.locator("svg[role=application] rect[class*=block]");
   await expect(blocks).toHaveCount(0);
+  // Pin the cursor to column 0: clicking the surface lands on the center
+  // cell, which on an odd grid is its own rotational twin.
+  for (let i = 0; i < 4; i++) await surface.press("ArrowLeft");
   await surface.press("Period");
   await expect(blocks).toHaveCount(2); // cell + rotational twin
   await surface.press("ControlOrMeta+z");

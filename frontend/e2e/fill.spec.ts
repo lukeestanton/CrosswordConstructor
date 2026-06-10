@@ -54,6 +54,9 @@ test("autofill completes a 3×3 as a single undoable step", async ({ page }) => 
   await surface.click();
   const autofill = page.getByRole("button", { name: "Autofill" });
   await expect(autofill).toBeEnabled({ timeout: 20_000 });
+  // The test dict's square (WAN;40, INA;30) sits below the default 50+
+  // cutoff — drop it so the fill genuinely exists.
+  await page.getByLabel("Wordlist score cutoff").selectOption("0");
   await autofill.click();
   await expect(page.getByText(/filled \d+ cells/)).toBeVisible({ timeout: 20_000 });
   // 9 letters painted.
