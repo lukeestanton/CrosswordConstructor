@@ -18,8 +18,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from app.config import settings  # noqa: E402
 from app.db import Base, engine  # noqa: E402
 
-# Import models so their tables register on Base.metadata (none yet in slice 1).
-# from app import models  # noqa: E402,F401
+# Import models so their tables register on Base.metadata.
+from app import models  # noqa: E402,F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)
