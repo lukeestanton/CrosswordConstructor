@@ -17,7 +17,7 @@ import datetime
 import json
 import logging
 import time
-from typing import Callable
+from typing import Callable, Iterator
 
 import httpx
 from sqlalchemy import func, select
@@ -36,8 +36,25 @@ GAME_PATH = "/svc/crosswords/v6/game/{puzzle_id}.json"
 # Scraping etiquette: pause between per-puzzle calls. Injectable for tests.
 PER_PUZZLE_DELAY_SECS = 0.5
 
+# The puzzle-list endpoint caps each response at 100 results AND only populates
+# per-user fields (solved/star/percent_filled) for sufficiently narrow windows —
+# a wide date range silently comes back unenriched. So we always page the list
+# in <=90-day windows (a quarter of daily puzzles, comfortably under the cap).
+LIST_WINDOW_DAYS = 90
+
+# A wide backfill makes ~130 list calls; a single transient blip shouldn't sink
+# the whole walk, so each window is retried with linear backoff before giving up.
+LIST_RETRIES = 4
+
+# Commit every this many upserts so a late failure on a long walk loses little —
+# the upsert is idempotent, so a re-run resumes cheaply.
+COMMIT_EVERY = 100
+
 # Incremental sync with an empty table starts this far back.
 EMPTY_BACKFILL_DAYS = 30
+
+# Earliest date the puzzle-list API serves; --full backfills walk back to here.
+ARCHIVE_FLOOR = datetime.date(1993, 11, 21)
 
 
 class NytSyncError(RuntimeError):
@@ -91,48 +108,110 @@ def _fetch_calcs(client: httpx.Client, puzzle_id: int) -> dict:
     return calcs if isinstance(calcs, dict) else {}
 
 
+def _fetch_list_window(
+    client: httpx.Client,
+    window_start: datetime.date,
+    window_end: datetime.date,
+    sleep: Callable[[float], None],
+) -> list:
+    """Fetch one list window, retrying transient failures with linear backoff.
+
+    Raises :class:`NytSyncError` only after every retry fails — its message
+    carries the failing window and the exception class name, never the cookie.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(LIST_RETRIES):
+        if attempt:
+            sleep(PER_PUZZLE_DELAY_SECS * (attempt + 1))
+        try:
+            resp = client.get(
+                PUZZLE_LIST_PATH,
+                params={
+                    "publish_type": "daily",
+                    "date_start": window_start.isoformat(),
+                    "date_end": window_end.isoformat(),
+                },
+            )
+            resp.raise_for_status()
+            return resp.json().get("results") or []
+        except (httpx.HTTPError, ValueError) as exc:
+            last_exc = exc
+            logger.warning(
+                "nyt list window %s..%s failed (%s), attempt %d/%d",
+                window_start, window_end, type(exc).__name__, attempt + 1, LIST_RETRIES,
+            )
+    raise NytSyncError(
+        f"NYT puzzle list fetch failed for {window_start}..{window_end} "
+        f"({type(last_exc).__name__})"
+    ) from last_exc
+
+
+def _iter_list_entries(
+    client: httpx.Client,
+    start: datetime.date,
+    end: datetime.date,
+    sleep: Callable[[float], None],
+) -> Iterator[dict]:
+    """Yield daily-puzzle list entries across [start, end].
+
+    Pages the list endpoint in <=90-day windows, walking backward from ``end``,
+    so every response stays under the 100-result cap and carries the per-user
+    enrichment (see :data:`LIST_WINDOW_DAYS`). A window that returns nothing —
+    e.g. before the archive floor — simply contributes no entries; the walk
+    continues to ``start``.
+    """
+    window_end = end
+    first = True
+    while window_end >= start:
+        window_start = max(start, window_end - datetime.timedelta(days=LIST_WINDOW_DAYS - 1))
+        if not first:
+            sleep(PER_PUZZLE_DELAY_SECS)
+        first = False
+        for entry in _fetch_list_window(client, window_start, window_end, sleep):
+            if isinstance(entry, dict):
+                yield entry
+        window_end = window_start - datetime.timedelta(days=1)
+
+
 def sync_solves(
     session: Session,
     client: httpx.Client,
     start: datetime.date,
     end: datetime.date,
     sleep: Callable[[float], None] = time.sleep,
+    fetch_times: bool = True,
 ) -> int:
-    """Fetch the puzzle list for [start, end] and upsert one Solve per date."""
-    try:
-        resp = client.get(
-            PUZZLE_LIST_PATH,
-            params={
-                "publish_type": "daily",
-                "date_start": start.isoformat(),
-                "date_end": end.isoformat(),
-            },
-        )
-        resp.raise_for_status()
-        results = resp.json().get("results") or []
-    except (httpx.HTTPError, ValueError) as exc:
-        # Generic message + class name only — never headers, never the cookie.
-        raise NytSyncError(
-            f"NYT puzzle list fetch failed ({type(exc).__name__})"
-        ) from exc
+    """Upsert the solve history for [start, end], paging the list as needed.
 
+    ``solved``/``star``/``percent_filled`` come from the (cheap, paged) list.
+    Only *engaged* puzzles — solved or in progress — are recorded, so the table
+    stays a solve history rather than a catalog of every daily ever published.
+    For each engaged puzzle, unless ``fetch_times`` is False, one game-state
+    call supplies the solve time (and authoritative solved flag).
+    """
     synced = 0
-    for i, entry in enumerate(results):
-        if not isinstance(entry, dict):
-            continue
+    game_calls = 0
+    for entry in _iter_list_entries(client, start, end, sleep):
         puzzle_date = _to_date(entry.get("print_date"))
         if puzzle_date is None:
             continue
+        solved = bool(entry.get("solved"))
+        pct = entry.get("percent_filled")
+        in_progress = isinstance(pct, int) and not isinstance(pct, bool) and pct > 0
+        if not solved and not in_progress:
+            continue  # untouched puzzle — not part of the solve history
+
         puzzle_id = entry.get("puzzle_id")
-
-        if i:
-            sleep(PER_PUZZLE_DELAY_SECS)
-        calcs = _fetch_calcs(client, puzzle_id) if puzzle_id is not None else {}
-
-        solved = bool(calcs.get("solved", entry.get("solved", False)))
-        solve_time = calcs.get("secondsSpentSolving")
-        if not isinstance(solve_time, int):
-            solve_time = None
+        solve_time = None
+        if fetch_times and puzzle_id is not None:
+            if game_calls:
+                sleep(PER_PUZZLE_DELAY_SECS)
+            game_calls += 1
+            calcs = _fetch_calcs(client, puzzle_id)
+            st = calcs.get("secondsSpentSolving")
+            solve_time = st if isinstance(st, int) and not isinstance(st, bool) else None
+            if "solved" in calcs:  # game state is authoritative when present
+                solved = bool(calcs.get("solved"))
 
         row = session.execute(
             select(Solve).where(Solve.puzzle_date == puzzle_date)
@@ -142,11 +221,14 @@ def sync_solves(
             session.add(row)
         row.nyt_puzzle_id = puzzle_id
         row.solved = solved
-        row.solve_time_secs = solve_time
+        if fetch_times:  # a --no-times pass must not wipe previously-fetched times
+            row.solve_time_secs = solve_time
         row.day_of_week = puzzle_date.weekday()
         row.raw = json.dumps(entry, sort_keys=True)
         row.synced_at = datetime.datetime.utcnow()
         synced += 1
+        if synced % COMMIT_EVERY == 0:  # save progress on long backfills
+            session.commit()
 
     session.commit()
     logger.info("nyt sync: %d solves upserted (%s..%s)", synced, start, end)

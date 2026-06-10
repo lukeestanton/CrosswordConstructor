@@ -6,6 +6,12 @@ Usage (from backend/):
     .venv/bin/python scripts/sync_solver.py --targets nyt           # one target
     .venv/bin/python scripts/sync_solver.py --targets nyt \\
         --start 2026-01-01 --end 2026-01-31                         # explicit NYT window
+    .venv/bin/python scripts/sync_solver.py --targets nyt --full    # entire NYT history
+
+NYT windows of any length are paged automatically (90 days per request), so a
+wide --start or --full just works. --full walks back to the archive floor
+(Nov 1993). Solve times come from one game-state call per engaged puzzle; pass
+--no-times to skip those (much faster — solved status only).
 
 Targets needing configuration are skipped politely: nyt needs TIMES_COOKIE
 and polls needs POLL_ARCHIVE_URL (both in the repo-root .env). Rex Parker is
@@ -42,6 +48,16 @@ def main() -> int:
         default=None,
         help="NYT window end (YYYY-MM-DD); defaults to today when --start is given",
     )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="backfill the entire NYT history (walk back to the archive floor)",
+    )
+    parser.add_argument(
+        "--no-times",
+        action="store_true",
+        help="skip per-puzzle game-state calls (solved status only, much faster)",
+    )
     args = parser.parse_args()
 
     # App imports after parse_args so `--help` works without touching the app.
@@ -49,7 +65,12 @@ def main() -> int:
 
     from app.config import settings  # noqa: E402
     from app.db import SessionLocal  # noqa: E402
-    from app.services.nyt import make_nyt_client, sync_incremental, sync_solves  # noqa: E402
+    from app.services.nyt import (  # noqa: E402
+        ARCHIVE_FLOOR,
+        make_nyt_client,
+        sync_incremental,
+        sync_solves,
+    )
     from app.services.polls import sync_polls  # noqa: E402
     from app.services.rexparker import sync_rex  # noqa: E402
 
@@ -67,9 +88,13 @@ def main() -> int:
                 print("nyt: skipped — set TIMES_COOKIE in the repo-root .env first")
             else:
                 with make_nyt_client(settings.times_cookie) as client:
-                    if args.start:
+                    if args.full or args.start:
+                        start = ARCHIVE_FLOOR if args.full else args.start
                         end = args.end or datetime.date.today()
-                        n = sync_solves(session, client, args.start, end)
+                        print(f"nyt: backfilling {start}..{end} (paged)…")
+                        n = sync_solves(
+                            session, client, start, end, fetch_times=not args.no_times
+                        )
                     else:
                         n = sync_incremental(session, client)
                 print(f"nyt: {n} solves synced")

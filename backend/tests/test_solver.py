@@ -270,6 +270,59 @@ def test_sync_incremental_window(db_session):
     assert params_seen[-1]["date_end"] == today.isoformat()
 
 
+def test_sync_solves_pages_wide_range_and_skips_untouched(db_session):
+    """A range wider than one window is paged into <=90-day list calls; only
+    engaged (solved or in-progress) puzzles are recorded, and game-state is
+    fetched only for those."""
+    from sqlalchemy import select
+
+    from app.models import Solve
+    from app.services.nyt import LIST_WINDOW_DAYS, make_nyt_client, sync_solves
+
+    end = datetime.date(2026, 6, 10)
+    start = datetime.date(2026, 1, 1)  # ~160 days -> two windows
+    recent_start = (end - datetime.timedelta(days=LIST_WINDOW_DAYS - 1)).isoformat()
+
+    list_windows: list[tuple[str, str]] = []
+    game_ids: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/svc/crosswords/v3/puzzles.json":
+            p = request.url.params
+            list_windows.append((p["date_start"], p["date_end"]))
+            if p["date_start"] == recent_start:  # newest window
+                return httpx.Response(200, json={"results": [
+                    {"puzzle_id": 100, "print_date": "2026-06-01", "solved": True, "percent_filled": 100, "star": "Gold"},
+                    {"puzzle_id": 101, "print_date": "2026-05-01", "solved": False, "percent_filled": 0},  # untouched
+                ]})
+            return httpx.Response(200, json={"results": [  # older window
+                {"puzzle_id": 102, "print_date": "2026-02-01", "solved": False, "percent_filled": 50},  # in progress
+            ]})
+        m = re.fullmatch(r"/svc/crosswords/v6/game/(\d+)\.json", request.url.path)
+        if m:
+            pid = int(m.group(1))
+            game_ids.append(pid)
+            if pid == 100:
+                return httpx.Response(200, json={"calcs": {"secondsSpentSolving": 500, "solved": True}})
+            return httpx.Response(200, json={"puzzleID": pid})  # no calcs
+        return httpx.Response(404)
+
+    with make_nyt_client(COOKIE, transport=httpx.MockTransport(handler)) as c:
+        n = sync_solves(db_session, c, start, end, sleep=lambda _: None)
+
+    assert n == 2  # the untouched 2026-05-01 is skipped
+    assert len(list_windows) == 2  # paged into two windows
+    assert (start.isoformat(), "2026-03-12") in list_windows  # older window reaches start
+    assert game_ids == [100, 102]  # game-state fetched only for engaged puzzles
+
+    rows = {s.puzzle_date: s for s in db_session.execute(select(Solve)).scalars()}
+    assert set(rows) == {datetime.date(2026, 6, 1), datetime.date(2026, 2, 1)}
+    assert rows[datetime.date(2026, 6, 1)].solved is True
+    assert rows[datetime.date(2026, 6, 1)].solve_time_secs == 500
+    assert rows[datetime.date(2026, 2, 1)].solved is False  # in progress, not solved
+    assert rows[datetime.date(2026, 2, 1)].solve_time_secs is None
+
+
 # ---------------------------------------------------------------------------
 # Polls
 # ---------------------------------------------------------------------------
