@@ -407,3 +407,31 @@
 .working {
   color: var(--accent);
 }
+
+/* --- Intel panel --------------------------------------------------------- */
+
+.intelList {
+  list-style: none;
+  margin-top: var(--sp-2);
+}
+
+.intelSense {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: 2px 0;
+  font-size: var(--fs-s);
+}
+
+.intelClue {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.intelDate {
+  margin-left: auto;
+  color: var(--ink-muted);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}

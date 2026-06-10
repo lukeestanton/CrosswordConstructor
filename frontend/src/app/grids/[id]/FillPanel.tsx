@@ -36,21 +36,14 @@ interface Props {
   dispatch: (a: EditorAction) => void;
   heatOn: boolean;
   onOverlay: (overlay: FillOverlay) => void;
-  /** Per-word freshness lookup, wired by the clue-intelligence slice. */
-  freshness?: Map<string, { count: number; lastSeen: string | null }>;
-  onCandidates?: (words: string[]) => void;
 }
 
 const CUTOFFS = [0, 30, 40, 50, 60];
 
-export function FillPanel({
-  state,
-  dispatch,
-  heatOn,
-  onOverlay,
-  freshness,
-  onCandidates,
-}: Props) {
+/** Session-lived corpus freshness cache: answer → {count, lastSeen}. */
+const freshnessCache = new Map<string, { count: number; lastSeen: string | null }>();
+
+export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   const clientRef = useRef<FillClient | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [wordCount, setWordCount] = useState(0);
@@ -58,6 +51,7 @@ export function FillPanel({
   const [cands, setCands] = useState<Candidate[]>([]);
   const [filling, setFilling] = useState(false);
   const [fillNote, setFillNote] = useState<string | null>(null);
+  const [, setFreshTick] = useState(0);
   const candSeq = useRef(0);
   const analyzeSeq = useRef(0);
 
@@ -97,10 +91,7 @@ export function FillPanel({
       }
       try {
         const result = await clientRef.current!.candidates(template, cutoff, engineSlot);
-        if (candSeq.current === seq) {
-          setCands(result);
-          onCandidates?.(result.map((c) => c.word));
-        }
+        if (candSeq.current === seq) setCands(result);
       } catch {
         /* worker was canceled/respawned — stale by definition */
       }
@@ -108,6 +99,36 @@ export function FillPanel({
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, template, slotKey, cutoff]);
+
+  // --- corpus freshness (after the list renders; the list never waits) -----
+  useEffect(() => {
+    const missing = cands
+      .slice(0, 40)
+      .map((c) => c.word)
+      .filter((w) => !freshnessCache.has(w));
+    if (missing.length === 0) return;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/clue-intel/entries", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ answers: missing }),
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        for (const [word, v] of Object.entries<{
+          appearance_count: number;
+          last_seen: string | null;
+        }>(data.entries)) {
+          freshnessCache.set(word, { count: v.appearance_count, lastSeen: v.last_seen });
+        }
+        setFreshTick((t) => t + 1);
+      } catch {
+        /* corpus offline — the column stays quiet */
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [cands]);
 
   // --- ambient analysis (heat + unfillable) ------------------------------
   useEffect(() => {
@@ -214,7 +235,7 @@ export function FillPanel({
       )}
       <ul className={styles.candList}>
         {cands.slice(0, 40).map((cand) => {
-          const fresh = freshness?.get(cand.word);
+          const fresh = freshnessCache.get(cand.word);
           return (
             <li key={cand.word}>
               <button className={styles.candRow} onClick={() => accept(cand.word)}>

@@ -151,3 +151,19 @@ the grid is never touched until success applies one undoable `applyFill`.
 
 **Rebus limitation**: the engine sees a rebus cell as its first letter;
 noted in `src/lib/fill/template.ts`.
+
+## 2026-06-10 — Slice 5: clue intelligence
+
+**Freshness is fetched after the candidates render**, in debounced batches
+against `POST /api/clue-intel/entries` (one `IN` query), cached for the
+session — the list never waits on the corpus, per the spec's "panel lags,
+keystrokes never" rule. Never-seen words render a quiet "—"/"unused", which
+is often the desirable answer (a debut entry).
+
+**Clue-text dupe threshold**: entries under 4 letters are excluded from the
+"clue contains a grid entry" check — shorter ones false-positive on ordinary
+English constantly.
+
+**Slot history panel** reuses the entry page's sense grouping server-side
+(same `build_senses`), trimmed to 6 senses × 3 citations, fetched on 250ms
+cursor idle and cached per answer.

@@ -27,6 +27,7 @@ import type { GridState, Symmetry } from "@/lib/grid/types";
 import { CluePanel } from "./CluePanel";
 import { ExportMenu } from "./ExportMenu";
 import { FillPanel, type FillOverlay } from "./FillPanel";
+import { IntelPanel } from "./IntelPanel";
 import { SnapshotPanel } from "./SnapshotPanel";
 import styles from "./editor.module.css";
 
@@ -509,6 +510,8 @@ export default function GridEditorPage() {
             heatOn={heatOn}
             onOverlay={setFillOverlay}
           />
+
+          <IntelPanel state={state} />
 
           <CluePanel
             state={state}
