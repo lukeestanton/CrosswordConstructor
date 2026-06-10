@@ -88,6 +88,27 @@ test("a candidate that would kill the grid is struck and sinks", async ({
   ).toBeVisible();
 });
 
+test("a proven-unfillable grid surfaces the ambient no-fill warning", async ({
+  page,
+}) => {
+  const surface = await openEditor(page, `${DICT}AAA;90\n`);
+  await surface.click();
+  await page.getByLabel("Wordlist score cutoff").selectOption("0");
+  // Type AAA down column 0: every row must then start with A, and AAA is the
+  // only such word — three forced duplicates, provably no fill.
+  for (let i = 0; i < 4; i++) await surface.press("ArrowLeft"); // pin col 0
+  await surface.press("ArrowUp"); // perpendicular: toggle to down
+  await surface.press("ArrowUp"); // move to (0,0)
+  await surface.press("KeyA");
+  await surface.press("KeyA");
+  await surface.press("KeyA");
+  const banner = page.getByText(/no complete fill exists/i);
+  await expect(banner).toBeVisible({ timeout: 20_000 });
+  // Undoing the letters restores fillability; the proof banner clears.
+  for (let i = 0; i < 3; i++) await surface.press("ControlOrMeta+z");
+  await expect(banner).toBeHidden();
+});
+
 test("autofill completes a 3×3 as a single undoable step", async ({ page }) => {
   const surface = await openEditor(page);
   await surface.click();

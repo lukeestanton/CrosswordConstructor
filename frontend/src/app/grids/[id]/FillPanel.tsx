@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FillClient,
+  type AnalyzeResult,
   type CandidatesResult,
   type FillVerdict,
   type SlotReport,
@@ -56,6 +57,10 @@ const FRESH_BATCH = 200;
  * slower verdicts "unknown" (rendered as unverified, never as dead). */
 const VERIFY_TIMEOUT_MS = 250;
 
+/** Whole-grid fill-search budget — one check per grid state (cached), so it
+ * can afford a longer proof attempt than the per-candidate probes. */
+const GRID_VERIFY_TIMEOUT_MS = 1000;
+
 /** Session-lived corpus freshness cache: answer → {count, lastSeen}. */
 const freshnessCache = new Map<string, { count: number; lastSeen: string | null }>();
 
@@ -69,8 +74,10 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   const [filling, setFilling] = useState(false);
   const [fillNote, setFillNote] = useState<string | null>(null);
   const [, setFreshTick] = useState(0);
-  const [verdicts, setVerdicts] = useState<Map<string, FillVerdict>>(new Map());
-  const [verifying, setVerifying] = useState(false);
+  /** Bumped whenever a verification verdict lands in the cache — verdict
+   * views below are derived from the cache, not mirrored into state. */
+  const [verifyTick, setVerifyTick] = useState(0);
+  const [analysis, setAnalysis] = useState<AnalyzeResult | null>(null);
   const candSeq = useRef(0);
   const analyzeSeq = useRef(0);
   const verifySeq = useRef(0);
@@ -78,6 +85,14 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   const template = useMemo(() => gridToTemplate(state), [state]);
   const active = activeSlot(state);
   const slotKey = active?.key ?? null;
+
+  // Collapse back to one page when the slot changes (render-time adjustment,
+  // so the first paint of a new slot never flashes the old page size).
+  const [pagedSlotKey, setPagedSlotKey] = useState(slotKey);
+  if (pagedSlotKey !== slotKey) {
+    setPagedSlotKey(slotKey);
+    setVisible(CAND_PAGE);
+  }
 
   // --- engine boot -----------------------------------------------------
   useEffect(() => {
@@ -101,10 +116,6 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   }, []);
 
   // --- live candidates ---------------------------------------------------
-  useEffect(() => {
-    setVisible(CAND_PAGE); // collapse back to one page when the slot changes
-  }, [slotKey]);
-
   useEffect(() => {
     const seq = ++candSeq.current;
     const engineSlot = active ? slotToEngine(active) : null;
@@ -168,49 +179,47 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
 
   // --- candidate verification (background; never touches the main worker) --
   // Each visible candidate gets a real fill search with the word substituted
-  // in: arc-consistency alone lets globally-dead words through. Verdicts
-  // stream in top-first; proven-dead rows dim and sink. Cancellation is
-  // cooperative (generation counter) — at worst one in-flight 250ms check
-  // goes stale.
+  // in: arc-consistency alone lets globally-dead words through. Verdict views
+  // are *derived* from the session cache (verifyTick invalidates); the effect
+  // only works the queue of unknowns. Cancellation is cooperative (generation
+  // counter) — at worst one in-flight 250ms check goes stale.
+  const verdicts = useMemo(() => {
+    const m = new Map<string, FillVerdict>();
+    if (!active) return m;
+    for (const cand of cands.items) {
+      const v = getVerdict(
+        verdictKey(cutoff, templateWithWord(template, active, cand.word)),
+      );
+      if (v !== undefined) m.set(cand.word, v);
+    }
+    return m;
+    // verifyTick tracks the external cache the values come from.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cands, template, slotKey, cutoff, verifyTick]);
+
   useEffect(() => {
     const seq = ++verifySeq.current;
-    if (status !== "ready" || !active || cands.items.length === 0) {
-      setVerdicts(new Map());
-      setVerifying(false);
-      return;
-    }
+    if (status !== "ready" || !active || cands.items.length === 0) return;
     const slot = active;
-    const known = new Map<string, FillVerdict>();
-    const queue: { word: string; key: string; probe: string }[] = [];
-    for (const cand of cands.items) {
-      const probe = templateWithWord(template, slot, cand.word);
-      const key = verdictKey(cutoff, probe);
-      const hit = getVerdict(key);
-      if (hit !== undefined) known.set(cand.word, hit);
-      else queue.push({ word: cand.word, key, probe });
-    }
-    setVerdicts(known);
-    if (queue.length === 0) {
-      setVerifying(false);
-      return;
-    }
+    const queue = cands.items
+      .map((cand) => {
+        const probe = templateWithWord(template, slot, cand.word);
+        return { probe, key: verdictKey(cutoff, probe) };
+      })
+      .filter((item) => getVerdict(item.key) === undefined);
+    if (queue.length === 0) return;
     let cancelled = false;
     const timer = setTimeout(async () => {
-      setVerifying(true);
-      try {
-        for (const item of queue) {
-          if (cancelled || verifySeq.current !== seq) return;
-          const verdict = await clientRef.current!.checkFillable(
-            item.probe,
-            cutoff,
-            VERIFY_TIMEOUT_MS,
-          );
-          setVerdict(item.key, verdict);
-          if (cancelled || verifySeq.current !== seq) return;
-          setVerdicts((prev) => new Map(prev).set(item.word, verdict));
-        }
-      } finally {
-        if (verifySeq.current === seq) setVerifying(false);
+      for (const item of queue) {
+        if (cancelled || verifySeq.current !== seq) return;
+        const verdict = await clientRef.current!.checkFillable(
+          item.probe,
+          cutoff,
+          VERIFY_TIMEOUT_MS,
+        );
+        setVerdict(item.key, verdict);
+        if (cancelled) return;
+        setVerifyTick((t) => t + 1);
       }
     }, 200);
     return () => {
@@ -220,6 +229,37 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, cands, template, slotKey, cutoff]);
 
+  // --- whole-grid proof (background) --------------------------------------
+  // "Every candidate for some slot is a dead end" is equivalent to "the grid
+  // as filled has no complete fill" — one check proves it for all slots at
+  // once. Cached by cutoff|template (the same space candidate probes live
+  // in), so accepting a verified candidate is a cache hit. A cached "unknown"
+  // came from the shorter per-candidate budget, so the effect retries it with
+  // the grid budget rather than trusting it.
+  const gridVerdict =
+    status === "ready" ? getVerdict(verdictKey(cutoff, template)) : undefined;
+
+  useEffect(() => {
+    if (status !== "ready") return;
+    const key = verdictKey(cutoff, template);
+    const cached = getVerdict(key);
+    if (cached === "fillable" || cached === "unfillable") return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const verdict = await clientRef.current!.checkFillable(
+        template,
+        cutoff,
+        GRID_VERIFY_TIMEOUT_MS,
+      );
+      setVerdict(key, verdict);
+      if (!cancelled) setVerifyTick((t) => t + 1);
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [status, template, cutoff]);
+
   // --- ambient analysis (heat + unfillable) ------------------------------
   useEffect(() => {
     if (status !== "ready") return;
@@ -227,23 +267,12 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     const timer = setTimeout(async () => {
       try {
         const result = await clientRef.current!.analyze(template, cutoff);
-        if (analyzeSeq.current !== seq) return;
-        const heat = new Map<number, number>();
-        result.heat.forEach((h, idx) => {
-          if (h > 0.55) heat.set(idx, h);
-        });
-        const dead: SlotReport[] = result.slots.filter((s) => s.options === 0);
-        onOverlay({
-          heat,
-          unfillable: slotReportCells(state, dead),
-          contested: new Set(),
-        });
+        if (analyzeSeq.current === seq) setAnalysis(result);
       } catch {
         /* stale */
       }
     }, 300);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, template, cutoff]);
 
   // Stable partition: proven-dead candidates sink, score order preserved
@@ -256,6 +285,36 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     }
     return [...alive, ...dead];
   }, [cands, verdicts]);
+
+  // Slot-level aggregation. allDead is a *proof* (every viable candidate
+  // verified unfillable — unknowns and unverified rows block it); allShownDead
+  // covers the partial case where unfetched candidates remain.
+  const verifying =
+    status === "ready" &&
+    active !== null &&
+    cands.items.some((c) => !verdicts.has(c.word));
+  const allShownDead =
+    cands.items.length > 0 &&
+    cands.items.every((c) => verdicts.get(c.word) === "unfillable");
+  const allDead = allShownDead && cands.total === cands.items.length;
+
+  // Overlay composition (no wasm work): ambient analysis plus the active
+  // slot's cells when all of its candidates are proven dead — morally the
+  // same condition as the zero-options health warning.
+  useEffect(() => {
+    if (!analysis) return;
+    const heat = new Map<number, number>();
+    analysis.heat.forEach((h, idx) => {
+      if (h > 0.55) heat.set(idx, h);
+    });
+    const dead: SlotReport[] = analysis.slots.filter((s) => s.options === 0);
+    const unfillable = slotReportCells(state, dead);
+    if (allDead && active) {
+      for (const p of active.cells) unfillable.add(p.r * state.width + p.c);
+    }
+    onOverlay({ heat, unfillable, contested: new Set() });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysis, allDead, slotKey]);
 
   // --- actions -----------------------------------------------------------
   const accept = useCallback(
@@ -336,6 +395,24 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
         </span>
       </div>
 
+      {gridVerdict === "unfillable" && (
+        <p className={styles.deadNote}>
+          No complete fill exists for the grid as filled (cutoff {cutoff}+) —
+          every candidate in every slot is a dead end.
+        </p>
+      )}
+      {gridVerdict !== "unfillable" && allDead && (
+        <p className={styles.deadNote}>
+          All {cands.total} candidates for this slot are proven dead ends —
+          the grid cannot be completed as filled.
+        </p>
+      )}
+      {gridVerdict !== "unfillable" && !allDead && allShownDead && (
+        <p className={styles.quiet}>
+          All {cands.items.length} shown are dead ends — expand to test the
+          remaining {(cands.total - cands.items.length).toLocaleString()}.
+        </p>
+      )}
       {status === "ready" && active && cands.items.length === 0 && (
         <p className={styles.quiet}>No wordlist matches for this pattern.</p>
       )}

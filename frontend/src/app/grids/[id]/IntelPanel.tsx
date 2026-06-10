@@ -36,14 +36,21 @@ const SHOWN_STEP = 10;
 export function IntelPanel({ state }: { state: GridState }) {
   const [intel, setIntel] = useState<Intel | null>(null);
   const [shown, setShown] = useState(SHOWN_DEFAULT);
+  const [shownFor, setShownFor] = useState<string | null>(null);
 
   const active = activeSlot(state);
   const entry = active ? slotEntry(state, active) : "";
   const complete = entry !== "" && !entry.includes("?");
   const lookup = complete ? entry : null;
 
-  useEffect(() => {
+  // Collapse to the default sense count when the looked-up word changes
+  // (render-time adjustment — no flash of the old expansion).
+  if (shownFor !== lookup) {
+    setShownFor(lookup);
     setShown(SHOWN_DEFAULT);
+  }
+
+  useEffect(() => {
     const timer = setTimeout(async () => {
       if (!lookup) {
         setIntel(null);

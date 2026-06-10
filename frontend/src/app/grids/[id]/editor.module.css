@@ -383,6 +383,16 @@
   opacity: 0.45;
 }
 
+/* Proof-of-no-fill warning: ambient, color does the alarming — no chrome,
+ * no popup, per the health-channel rule. */
+.deadNote {
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  margin-top: var(--sp-2);
+}
+
 .candDead .candWord {
   text-decoration: line-through;
 }

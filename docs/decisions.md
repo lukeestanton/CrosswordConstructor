@@ -188,6 +188,17 @@ cap 2,000. Dead rows dim/strike and sink below live ones, still clickable —
 the verdict is advice, not a gate. Cost: doubled wasm memory (two WordLists);
 fallback if it ever bites is sequencing checks on the main worker.
 
+**Whole-grid proof banner.** "Every candidate for some slot is proven dead"
+is equivalent to "the grid as filled has no fill" — so instead of
+aggregating per-slot, one background `check_fillable` on the current
+template (1s budget, same verdict cache, so accepting a verified candidate
+is a hit) proves it for all slots at once. A proven no-fill shows an ambient
+accent-colored note in the fill panel, never a popup. The active slot still
+gets local aggregation: all *fetched* candidates dead + none unfetched →
+slot cells join the unfillable health marking; dead-so-far with more
+unfetched → a quiet "expand to test the rest" hint. Unknown/timeout verdicts
+block all of these — warnings only ever state proofs.
+
 **List expansion by paging, not virtualization.** The wasm reports the true
 viable total alongside each page (`{total, items}`); the panel starts at 40
 rows and expands +200 per click, re-requesting (one slot-options +
