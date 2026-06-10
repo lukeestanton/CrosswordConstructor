@@ -196,3 +196,14 @@ personal solve history to learn from.
 (Anthropic has no embeddings API) and FTS5 + sense grouping cover today's
 search needs. The capability stays verified at startup for when a use
 arrives (clue-similarity clustering is the obvious candidate).
+
+## 2026-06-10 — Post-CI fix: vendored ingrid_core
+
+The first real-browser CI run caught a genuine product bug the native tests
+couldn't: published ingrid_core 1.3.1 calls `std::time::Instant::now()`
+unconditionally in `find_fill`, which panics ("time not implemented") on
+wasm32-unknown-unknown — every autofill aborted in the browser. Fixed by
+vendoring the crate (`rust/vendor/ingrid_core`, see its VENDORED.md) with a
+one-line import swap to the API-compatible `instant` crate, wired via
+`[patch.crates-io]`. `console_error_panic_hook` added to the wrapper so any
+future wasm panic surfaces with a message instead of a bare `unreachable`.

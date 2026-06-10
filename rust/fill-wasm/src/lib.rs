@@ -87,6 +87,7 @@ fn parse_dict(text: &str) -> Vec<(String, u16)> {
 /// else; the heavy step (dupe index etc.) happens once here.
 #[wasm_bindgen]
 pub fn init_wordlist(dict_text: &str) -> usize {
+    console_error_panic_hook::set_once();
     let words = parse_dict(dict_text);
     let count = words.len();
     let list = WordList::new(
