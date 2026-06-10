@@ -42,6 +42,9 @@ self.onmessage = async (event) => {
       case "autofill":
         result = wasm_bindgen.autofill(args.template, args.minScore, args.timeoutMs);
         break;
+      case "checkFillable":
+        result = wasm_bindgen.check_fillable(args.template, args.minScore, args.timeoutMs);
+        break;
       default:
         throw new Error(`unknown op ${op}`);
     }

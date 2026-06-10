@@ -171,6 +171,33 @@ English constantly.
 (same `build_senses`), trimmed to 6 senses × 3 citations, fetched on 250ms
 cursor idle and cached per answer.
 
+## 2026-06-10 — Grid editor: verification, expandable lists, block dblclick
+
+**Candidate verification = a real fill search per candidate.** Arc
+consistency (the candidates filter) is pairwise and only propagates dupe
+rules from singleton slots, so words that globally kill the grid still pass
+it. `check_fillable` in fill-wasm substitutes the candidate into the template
+and runs `find_fill` with a 250ms budget; only a proven `HardFailure` marks a
+row "unfillable" — a timeout verdicts "unknown" and renders as unverified,
+never as dead. Runs on a **dedicated second worker** (one extra dict parse at
+boot, lazy) so it never queues behind autofill or delays the candidates a
+keystroke just requested; cancellation is a generation counter, not worker
+termination (terminate would re-parse the 314k dict on every cursor move).
+Verdicts cache by `cutoff|substituted-template` (encodes grid+slot+word),
+cap 2,000. Dead rows dim/strike and sink below live ones, still clickable —
+the verdict is advice, not a gate. Cost: doubled wasm memory (two WordLists);
+fallback if it ever bites is sequencing checks on the main worker.
+
+**List expansion by paging, not virtualization.** The wasm reports the true
+viable total alongside each page (`{total, items}`); the panel starts at 40
+rows and expands +200 per click, re-requesting (one slot-options +
+arc-consistency pass, off-thread — keystroke-update cost class). No
+virtualization dependency; the DOM only ever holds what was asked for, so
+the spec's "list lags, keystroke never" rule stays trivially true.
+Clue-history senses likewise: `GET /api/clue-intel/{answer}` takes
+`limit`/`citations` (0 = all, defaults unchanged at 6×3); the panel shows 4
+and refetches untrimmed on first expansion.
+
 ## 2026-06-10 — Slice 6: solver side
 
 **Every pipeline is fixture-tested, no network in tests** (httpx.MockTransport

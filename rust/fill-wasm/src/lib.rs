@@ -257,6 +257,34 @@ fn candidates_inner(
     })
 }
 
+/// Candidate verification: is this exact grid (template with all current
+/// letters, including a substituted candidate) globally fillable?
+///
+/// "unfillable" is a *proof* (initial arc consistency failed, dupes included,
+/// or the search space was exhausted); "unknown" means the search hit its
+/// timeout or backtrack budget — the UI must treat it like unverified, never
+/// like unfillable.
+#[wasm_bindgen]
+pub fn check_fillable(template: &str, min_score: u16, timeout_ms: u32) -> Result<JsValue, JsError> {
+    let verdict = check_fillable_inner(template, min_score, timeout_ms)?;
+    Ok(serde_wasm_bindgen::to_value(&verdict)?)
+}
+
+fn check_fillable_inner(
+    template: &str,
+    min_score: u16,
+    timeout_ms: u32,
+) -> Result<&'static str, JsError> {
+    with_config(template, min_score, |config| {
+        let cfg = config.to_config_ref();
+        match find_fill(&cfg, Some(Duration::from_millis(u64::from(timeout_ms)))) {
+            Ok(_) => "fillable",
+            Err(FillFailure::HardFailure) => "unfillable",
+            Err(_) => "unknown",
+        }
+    })
+}
+
 #[wasm_bindgen]
 pub fn autofill(template: &str, min_score: u16, timeout_ms: u32) -> Result<JsValue, JsError> {
     let result = with_config(template, min_score, |config| {
@@ -399,6 +427,14 @@ mod tests {
         })
         .unwrap();
         assert!(result);
+    }
+
+    #[test]
+    fn check_fillable_proves_verdicts() {
+        init();
+        assert_eq!(check_fillable_inner("b..\n...\n...", 0, 5000).unwrap(), "fillable");
+        // 'x' satisfies no crossing in this dict: a proven dead end.
+        assert_eq!(check_fillable_inner("x..\n...\n...", 0, 5000).unwrap(), "unfillable");
     }
 
     #[test]

@@ -67,6 +67,27 @@ test("candidates list reports the true total and expands on demand", async ({
   await expect(rows).toHaveCount(64);
 });
 
+test("a candidate that would kill the grid is struck and sinks", async ({
+  page,
+}) => {
+  // AAA passes arc consistency on the open grid (it supports itself in every
+  // crossing) but placing it forces its own column to duplicate it — a proven
+  // dead end only a real fill search catches.
+  const surface = await openEditor(page, `${DICT}AAA;90\n`);
+  await surface.click();
+  await page.getByLabel("Wordlist score cutoff").selectOption("0");
+  const aaa = page.locator("ul[class*=candList] li button", { hasText: "AAA" });
+  await expect(aaa).toBeVisible({ timeout: 20_000 });
+  // Background verification proves it unfillable: dim + strike + sink last.
+  await expect(aaa).toHaveClass(/candDead/, { timeout: 20_000 });
+  await expect(page.locator("ul[class*=candList] li").last()).toContainText("AAA");
+  // The keystroke path never waits on verification.
+  await surface.press("KeyB");
+  await expect(
+    page.locator("svg[role=application] text", { hasText: /^B$/ }),
+  ).toBeVisible();
+});
+
 test("autofill completes a 3×3 as a single undoable step", async ({ page }) => {
   const surface = await openEditor(page);
   await surface.click();

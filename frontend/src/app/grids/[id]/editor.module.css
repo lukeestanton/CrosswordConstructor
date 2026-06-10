@@ -377,6 +377,16 @@
   text-align: right;
 }
 
+/* Verified-unfillable candidate: struck and faded, still clickable — the
+ * verdict is advice, not a gate. */
+.candDead {
+  opacity: 0.45;
+}
+
+.candDead .candWord {
+  text-decoration: line-through;
+}
+
 .fillActions {
   display: flex;
   gap: var(--sp-3);

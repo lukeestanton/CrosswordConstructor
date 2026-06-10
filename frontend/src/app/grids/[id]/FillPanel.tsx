@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FillClient,
   type CandidatesResult,
+  type FillVerdict,
   type SlotReport,
 } from "@/lib/fill/client";
 import {
@@ -19,7 +20,9 @@ import {
   gridToTemplate,
   slotReportCells,
   slotToEngine,
+  templateWithWord,
 } from "@/lib/fill/template";
+import { getVerdict, setVerdict, verdictKey } from "@/lib/fill/verify";
 import type { EditorAction } from "@/lib/grid/history";
 import { activeSlot } from "@/lib/grid/slots";
 import type { GridState } from "@/lib/grid/types";
@@ -48,6 +51,11 @@ const CAND_STEP = 200;
 /** Freshness lookups batch at the backend's MAX_BATCH. */
 const FRESH_BATCH = 200;
 
+/** Per-candidate fill-search budget. Fillable grids resolve in single-digit
+ * ms and hard failures usually fall out of initial arc consistency; anything
+ * slower verdicts "unknown" (rendered as unverified, never as dead). */
+const VERIFY_TIMEOUT_MS = 250;
+
 /** Session-lived corpus freshness cache: answer → {count, lastSeen}. */
 const freshnessCache = new Map<string, { count: number; lastSeen: string | null }>();
 
@@ -61,8 +69,11 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   const [filling, setFilling] = useState(false);
   const [fillNote, setFillNote] = useState<string | null>(null);
   const [, setFreshTick] = useState(0);
+  const [verdicts, setVerdicts] = useState<Map<string, FillVerdict>>(new Map());
+  const [verifying, setVerifying] = useState(false);
   const candSeq = useRef(0);
   const analyzeSeq = useRef(0);
+  const verifySeq = useRef(0);
 
   const template = useMemo(() => gridToTemplate(state), [state]);
   const active = activeSlot(state);
@@ -155,6 +166,60 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     };
   }, [cands]);
 
+  // --- candidate verification (background; never touches the main worker) --
+  // Each visible candidate gets a real fill search with the word substituted
+  // in: arc-consistency alone lets globally-dead words through. Verdicts
+  // stream in top-first; proven-dead rows dim and sink. Cancellation is
+  // cooperative (generation counter) — at worst one in-flight 250ms check
+  // goes stale.
+  useEffect(() => {
+    const seq = ++verifySeq.current;
+    if (status !== "ready" || !active || cands.items.length === 0) {
+      setVerdicts(new Map());
+      setVerifying(false);
+      return;
+    }
+    const slot = active;
+    const known = new Map<string, FillVerdict>();
+    const queue: { word: string; key: string; probe: string }[] = [];
+    for (const cand of cands.items) {
+      const probe = templateWithWord(template, slot, cand.word);
+      const key = verdictKey(cutoff, probe);
+      const hit = getVerdict(key);
+      if (hit !== undefined) known.set(cand.word, hit);
+      else queue.push({ word: cand.word, key, probe });
+    }
+    setVerdicts(known);
+    if (queue.length === 0) {
+      setVerifying(false);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setVerifying(true);
+      try {
+        for (const item of queue) {
+          if (cancelled || verifySeq.current !== seq) return;
+          const verdict = await clientRef.current!.checkFillable(
+            item.probe,
+            cutoff,
+            VERIFY_TIMEOUT_MS,
+          );
+          setVerdict(item.key, verdict);
+          if (cancelled || verifySeq.current !== seq) return;
+          setVerdicts((prev) => new Map(prev).set(item.word, verdict));
+        }
+      } finally {
+        if (verifySeq.current === seq) setVerifying(false);
+      }
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, cands, template, slotKey, cutoff]);
+
   // --- ambient analysis (heat + unfillable) ------------------------------
   useEffect(() => {
     if (status !== "ready") return;
@@ -180,6 +245,17 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, template, cutoff]);
+
+  // Stable partition: proven-dead candidates sink, score order preserved
+  // within each group; rows reorder as verdicts stream in.
+  const ordered = useMemo(() => {
+    const alive: typeof cands.items = [];
+    const dead: typeof cands.items = [];
+    for (const cand of cands.items) {
+      (verdicts.get(cand.word) === "unfillable" ? dead : alive).push(cand);
+    }
+    return [...alive, ...dead];
+  }, [cands, verdicts]);
 
   // --- actions -----------------------------------------------------------
   const accept = useCallback(
@@ -235,6 +311,7 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
             (cands.total > cands.items.length
               ? ` · ${cands.items.length} of ${cands.total.toLocaleString()}`
               : ` · ${cands.total}`)}
+          {verifying && <span className={styles.working}> · verifying…</span>}
         </h2>
         <span className="caps-label">
           {status === "loading" && "loading wordlist…"}
@@ -263,11 +340,16 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
         <p className={styles.quiet}>No wordlist matches for this pattern.</p>
       )}
       <ul className={styles.candList}>
-        {cands.items.map((cand) => {
+        {ordered.map((cand) => {
           const fresh = freshnessCache.get(cand.word);
+          const dead = verdicts.get(cand.word) === "unfillable";
           return (
             <li key={cand.word}>
-              <button className={styles.candRow} onClick={() => accept(cand.word)}>
+              <button
+                className={dead ? `${styles.candRow} ${styles.candDead}` : styles.candRow}
+                onClick={() => accept(cand.word)}
+                title={dead ? "No complete fill exists with this word" : undefined}
+              >
                 <span className={`${styles.candWord} data`}>{cand.word}</span>
                 <span className={styles.leaderDots} aria-hidden="true" />
                 <span className={`${styles.candFresh} data`}>
