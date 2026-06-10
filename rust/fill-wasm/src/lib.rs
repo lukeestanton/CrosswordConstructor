@@ -55,6 +55,14 @@ pub struct Candidate {
 }
 
 #[derive(Serialize)]
+pub struct CandidatesResult {
+    /// Total viable candidates for the slot, before `limit` is applied — the
+    /// UI shows "N of total" and pages further on demand.
+    pub total: usize,
+    pub items: Vec<Candidate>,
+}
+
+#[derive(Serialize)]
 pub struct FillResult {
     pub ok: bool,
     /// On success: the filled grid, one row per line, lowercase letters.
@@ -200,7 +208,19 @@ pub fn candidates(
     slot_down: bool,
     limit: usize,
 ) -> Result<JsValue, JsError> {
-    let result: Vec<Candidate> = with_config(template, min_score, |config| {
+    let result = candidates_inner(template, min_score, slot_x, slot_y, slot_down, limit)?;
+    Ok(serde_wasm_bindgen::to_value(&result)?)
+}
+
+fn candidates_inner(
+    template: &str,
+    min_score: u16,
+    slot_x: usize,
+    slot_y: usize,
+    slot_down: bool,
+    limit: usize,
+) -> Result<CandidatesResult, JsError> {
+    with_config(template, min_score, |config| {
         let cfg = config.to_config_ref();
         let direction = if slot_down { Direction::Down } else { Direction::Across };
         let Some(slot_id) = config
@@ -208,7 +228,7 @@ pub fn candidates(
             .iter()
             .position(|sc| sc.start_cell == (slot_x, slot_y) && sc.direction == direction)
         else {
-            return Vec::new();
+            return CandidatesResult { total: 0, items: Vec::new() };
         };
 
         // Crossing-viability filter: arc-consistency eliminations.
@@ -217,9 +237,13 @@ pub fn candidates(
             .unwrap_or_default();
 
         let slot_len = config.slot_configs[slot_id].length;
-        config.slot_options[slot_id]
+        let viable: Vec<usize> = config.slot_options[slot_id]
             .iter()
             .filter(|w| !eliminated.contains(w))
+            .copied()
+            .collect();
+        let items = viable
+            .iter()
             .take(limit)
             .map(|&word_id| {
                 let word = &config.word_list.words[slot_len][word_id];
@@ -228,9 +252,9 @@ pub fn candidates(
                     score: word.score,
                 }
             })
-            .collect()
-    })?;
-    Ok(serde_wasm_bindgen::to_value(&result)?)
+            .collect();
+        CandidatesResult { total: viable.len(), items }
+    })
 }
 
 #[wasm_bindgen]
@@ -350,6 +374,18 @@ mod tests {
         .unwrap();
         assert!(!result.is_empty());
         assert!(result.iter().all(|w| w.to_uppercase().starts_with('B')));
+    }
+
+    #[test]
+    fn candidates_report_total_independent_of_limit() {
+        init();
+        let full = candidates_inner("b..\n...\n...", 0, 0, 0, false, 60).unwrap();
+        assert!(full.total >= full.items.len());
+        assert_eq!(full.total, full.items.len()); // tiny dict: all fit in 60
+
+        let one = candidates_inner("b..\n...\n...", 0, 0, 0, false, 1).unwrap();
+        assert_eq!(one.items.len(), 1);
+        assert_eq!(one.total, full.total); // limit pages the list, not the count
     }
 
     #[test]

@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FillClient,
-  type Candidate,
+  type CandidatesResult,
   type SlotReport,
 } from "@/lib/fill/client";
 import {
@@ -40,6 +40,14 @@ interface Props {
 
 const CUTOFFS = [0, 30, 40, 50, 60];
 
+/** Initial candidate page; "+more" expands in steps — never the full list at
+ * once (an open slot can match tens of thousands of words and the DOM should
+ * only ever hold what was asked for). */
+const CAND_PAGE = 40;
+const CAND_STEP = 200;
+/** Freshness lookups batch at the backend's MAX_BATCH. */
+const FRESH_BATCH = 200;
+
 /** Session-lived corpus freshness cache: answer → {count, lastSeen}. */
 const freshnessCache = new Map<string, { count: number; lastSeen: string | null }>();
 
@@ -48,7 +56,8 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [wordCount, setWordCount] = useState(0);
   const [cutoff, setCutoff] = useState(50);
-  const [cands, setCands] = useState<Candidate[]>([]);
+  const [cands, setCands] = useState<CandidatesResult>({ total: 0, items: [] });
+  const [visible, setVisible] = useState(CAND_PAGE);
   const [filling, setFilling] = useState(false);
   const [fillNote, setFillNote] = useState<string | null>(null);
   const [, setFreshTick] = useState(0);
@@ -82,15 +91,26 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
 
   // --- live candidates ---------------------------------------------------
   useEffect(() => {
+    setVisible(CAND_PAGE); // collapse back to one page when the slot changes
+  }, [slotKey]);
+
+  useEffect(() => {
     const seq = ++candSeq.current;
     const engineSlot = active ? slotToEngine(active) : null;
     const timer = setTimeout(async () => {
       if (status !== "ready" || !engineSlot) {
-        if (candSeq.current === seq) setCands([]);
+        if (candSeq.current === seq) setCands({ total: 0, items: [] });
         return;
       }
       try {
-        const result = await clientRef.current!.candidates(template, cutoff, engineSlot);
+        // Re-requesting on expand costs one slot-option + arc-consistency
+        // pass — the same work a keystroke update already does, off-thread.
+        const result = await clientRef.current!.candidates(
+          template,
+          cutoff,
+          engineSlot,
+          visible,
+        );
         if (candSeq.current === seq) setCands(result);
       } catch {
         /* worker was canceled/respawned — stale by definition */
@@ -98,36 +118,41 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     }, 120);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, template, slotKey, cutoff]);
+  }, [status, template, slotKey, cutoff, visible]);
 
   // --- corpus freshness (after the list renders; the list never waits) -----
   useEffect(() => {
-    const missing = cands
-      .slice(0, 40)
+    const missing = cands.items
       .map((c) => c.word)
       .filter((w) => !freshnessCache.has(w));
     if (missing.length === 0) return;
+    let alive = true;
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch("/api/clue-intel/entries", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ answers: missing }),
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        for (const [word, v] of Object.entries<{
-          appearance_count: number;
-          last_seen: string | null;
-        }>(data.entries)) {
-          freshnessCache.set(word, { count: v.appearance_count, lastSeen: v.last_seen });
+        for (let i = 0; i < missing.length && alive; i += FRESH_BATCH) {
+          const res = await fetch("/api/clue-intel/entries", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ answers: missing.slice(i, i + FRESH_BATCH) }),
+          });
+          if (!res.ok) return;
+          const data = await res.json();
+          for (const [word, v] of Object.entries<{
+            appearance_count: number;
+            last_seen: string | null;
+          }>(data.entries)) {
+            freshnessCache.set(word, { count: v.appearance_count, lastSeen: v.last_seen });
+          }
+          setFreshTick((t) => t + 1);
         }
-        setFreshTick((t) => t + 1);
       } catch {
         /* corpus offline — the column stays quiet */
       }
     }, 150);
-    return () => clearTimeout(timer);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
   }, [cands]);
 
   // --- ambient analysis (heat + unfillable) ------------------------------
@@ -205,7 +230,11 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     <section className={styles.panelBlock}>
       <div className={styles.candHeader}>
         <h2 className="caps-label">
-          Candidates{cands.length > 0 ? ` · ${cands.length}` : ""}
+          Candidates
+          {cands.total > 0 &&
+            (cands.total > cands.items.length
+              ? ` · ${cands.items.length} of ${cands.total.toLocaleString()}`
+              : ` · ${cands.total}`)}
         </h2>
         <span className="caps-label">
           {status === "loading" && "loading wordlist…"}
@@ -230,11 +259,11 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
         </span>
       </div>
 
-      {status === "ready" && active && cands.length === 0 && (
+      {status === "ready" && active && cands.items.length === 0 && (
         <p className={styles.quiet}>No wordlist matches for this pattern.</p>
       )}
       <ul className={styles.candList}>
-        {cands.slice(0, 40).map((cand) => {
+        {cands.items.map((cand) => {
           const fresh = freshnessCache.get(cand.word);
           return (
             <li key={cand.word}>
@@ -254,6 +283,15 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
           );
         })}
       </ul>
+      {cands.total > cands.items.length && (
+        <button
+          className={`${styles.statButton} data`}
+          onClick={() => setVisible((v) => v + CAND_STEP)}
+        >
+          + {Math.min(CAND_STEP, cands.total - cands.items.length)} more ·{" "}
+          {(cands.total - cands.items.length).toLocaleString()} hidden
+        </button>
+      )}
 
       <div className={styles.fillActions}>
         {filling ? (

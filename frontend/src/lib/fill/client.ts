@@ -25,6 +25,12 @@ export interface Candidate {
   score: number;
 }
 
+export interface CandidatesResult {
+  /** Total viable candidates before the limit — the UI shows "N of total". */
+  total: number;
+  items: Candidate[];
+}
+
 export interface FillResult {
   ok: boolean;
   grid?: string | null;
@@ -87,8 +93,8 @@ export class FillClient {
     minScore: number,
     slot: { x: number; y: number; down: boolean },
     limit = 60,
-  ): Promise<Candidate[]> {
-    return this.request<Candidate[]>("candidates", {
+  ): Promise<CandidatesResult> {
+    return this.request<CandidatesResult>("candidates", {
       template,
       minScore,
       x: slot.x,

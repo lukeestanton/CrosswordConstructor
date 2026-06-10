@@ -8,9 +8,9 @@ import { makeGridState } from "../src/lib/grid/types";
 // A 3×3 double word square so an open grid is genuinely fillable.
 const DICT = "BIT;50\nONE;60\nWAN;40\nBOW;55\nINA;30\nTEN;70\nBAT;45\nOAT;52\n";
 
-async function openEditor(page: Page) {
+async function openEditor(page: Page, dict = DICT) {
   await page.route("**/api/wordlist", (route) =>
-    route.fulfill({ contentType: "text/plain", body: DICT }),
+    route.fulfill({ contentType: "text/plain", body: dict }),
   );
   await page.route("**/api/grids/7", (route) => {
     if (route.request().method() === "PUT") return route.fulfill({ json: { rev: 1 } });
@@ -47,6 +47,24 @@ test("candidates appear for the active slot and accepting writes the word", asyn
   await candidate.click();
   const svg = page.locator("svg[role=application]");
   await expect(svg.locator("text", { hasText: /^[A-Z]$/ }).first()).toBeVisible();
+});
+
+test("candidates list reports the true total and expands on demand", async ({
+  page,
+}) => {
+  // 64 mutually-crossable words (every 3-letter string over {A,B,C,D}) — more
+  // than the 40-row first page, so the expand affordance must appear.
+  const letters = ["A", "B", "C", "D"];
+  const bigDict = letters
+    .flatMap((a) => letters.flatMap((b) => letters.map((c) => `${a}${b}${c};50`)))
+    .join("\n");
+  const surface = await openEditor(page, bigDict);
+  await surface.click();
+  const rows = page.locator("ul[class*=candList] li");
+  await expect(rows).toHaveCount(40, { timeout: 20_000 });
+  await expect(page.getByText(/40 of 64/i)).toBeVisible();
+  await page.getByRole("button", { name: /more/ }).click();
+  await expect(rows).toHaveCount(64);
 });
 
 test("autofill completes a 3×3 as a single undoable step", async ({ page }) => {

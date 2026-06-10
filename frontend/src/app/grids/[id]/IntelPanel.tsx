@@ -21,12 +21,21 @@ interface Intel {
     count: number;
     citations: { date: string | null; publication: string | null; clue_text: string }[];
   }[];
+  /** Client-side: payload holds every sense (untrimmed fetch, or fewer than
+   * the server's default trim came back). */
+  full?: boolean;
 }
 
 const cache = new Map<string, Intel>();
 
+/** Server default trim; a payload shorter than this is necessarily complete. */
+const SERVER_TRIM = 6;
+const SHOWN_DEFAULT = 4;
+const SHOWN_STEP = 10;
+
 export function IntelPanel({ state }: { state: GridState }) {
   const [intel, setIntel] = useState<Intel | null>(null);
+  const [shown, setShown] = useState(SHOWN_DEFAULT);
 
   const active = activeSlot(state);
   const entry = active ? slotEntry(state, active) : "";
@@ -34,6 +43,7 @@ export function IntelPanel({ state }: { state: GridState }) {
   const lookup = complete ? entry : null;
 
   useEffect(() => {
+    setShown(SHOWN_DEFAULT);
     const timer = setTimeout(async () => {
       if (!lookup) {
         setIntel(null);
@@ -48,6 +58,7 @@ export function IntelPanel({ state }: { state: GridState }) {
         const res = await fetch(`/api/clue-intel/${lookup}`);
         if (!res.ok) return;
         const data = (await res.json()) as Intel;
+        data.full = data.senses.length < SERVER_TRIM;
         cache.set(lookup, data);
         setIntel(data);
       } catch {
@@ -56,6 +67,21 @@ export function IntelPanel({ state }: { state: GridState }) {
     }, 250);
     return () => clearTimeout(timer);
   }, [lookup]);
+
+  async function showMore() {
+    setShown((s) => s + SHOWN_STEP);
+    if (!lookup || !intel || intel.full) return;
+    try {
+      const res = await fetch(`/api/clue-intel/${lookup}?limit=0`);
+      if (!res.ok) return;
+      const data = (await res.json()) as Intel;
+      data.full = true;
+      cache.set(lookup, data);
+      setIntel(data);
+    } catch {
+      /* keep the trimmed view */
+    }
+  }
 
   if (!lookup) return null;
 
@@ -72,7 +98,7 @@ export function IntelPanel({ state }: { state: GridState }) {
             {intel.appearance_count}× · last seen {intel.last_seen?.slice(0, 4) ?? "—"}
           </p>
           <ul className={styles.intelList}>
-            {intel.senses.slice(0, 4).map((sense, i) => (
+            {intel.senses.slice(0, shown).map((sense, i) => (
               <li key={i} className={styles.intelSense}>
                 <span className={styles.intelClue}>{sense.display}</span>
                 {sense.count > 1 && <span className="data"> ×{sense.count}</span>}
@@ -84,6 +110,12 @@ export function IntelPanel({ state }: { state: GridState }) {
               </li>
             ))}
           </ul>
+          {(intel.senses.length > shown || !intel.full) && (
+            <button className={`${styles.statButton} caps-label`} onClick={showMore}>
+              more senses
+              {intel.full ? ` · ${intel.senses.length - shown}` : ""}
+            </button>
+          )}
         </>
       )}
     </section>
