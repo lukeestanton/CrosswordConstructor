@@ -290,7 +290,8 @@ def test_sync_polls_parses_and_skips_bad_rows(db_session):
 
     with _polls_client() as client:
         n = sync_polls(db_session, client, "https://example.com/polls.json")
-    assert n == 3  # two bad rows + one non-dict skipped
+    # skipped: bad date, no date, pollExists=false, and the non-dict row
+    assert n == 3
 
     rows = {
         p.puzzle_date: p
@@ -305,11 +306,14 @@ def test_sync_polls_parses_and_skips_bad_rows(db_session):
     assert monday.source == "community-poll"
     assert monday.avg_rating == pytest.approx(4.6)
     assert monday.sample_size == 212
-    assert json.loads(monday.distribution) == {"1": 4, "2": 9, "3": 28, "4": 71, "5": 100}
+    assert json.loads(monday.distribution) == {
+        "excellent": 100, "good": 71, "average": 28, "poor": 9, "terrible": 4
+    }
 
-    sunday = rows[datetime.date(2026, 6, 7)]  # missing average tolerated
+    sunday = rows[datetime.date(2026, 6, 7)]  # missing averageRating tolerated
     assert sunday.avg_rating is None
     assert sunday.sample_size == 88
+    assert sunday.distribution is None  # no rating buckets present
 
 
 def test_sync_polls_idempotent(db_session):

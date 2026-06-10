@@ -1,29 +1,50 @@
 [
   {
-    "date": "2026-06-01",
-    "average": 4.6,
+    "dateString": "06/01/2026",
+    "publishedDate": 1780272000000,
+    "dayName": "Monday",
+    "pollExists": true,
+    "excellent": 100,
+    "good": 71,
+    "average": 28,
+    "poor": 9,
+    "terrible": 4,
+    "noVote": 10,
     "votes": 212,
-    "distribution": {"1": 4, "2": 9, "3": 28, "4": 71, "5": 100}
+    "averageRating": 4.6,
+    "pollURL": "https://example.com/poll/2026-06-01"
   },
   {
-    "date": "2026-06-02",
-    "average": 2.9,
+    "dateString": "06/02/2026",
+    "pollExists": true,
+    "excellent": 13,
+    "good": 26,
+    "average": 52,
+    "poor": 41,
+    "terrible": 22,
     "votes": 154,
-    "distribution": {"1": 22, "2": 41, "3": 52, "4": 26, "5": 13},
-    "thread_url": "https://example.com/poll/2026-06-02"
+    "averageRating": 2.9
   },
   {
-    "date": "2026-06-07",
+    "dateString": "06/07/2026",
+    "pollExists": true,
     "votes": 88
   },
   {
-    "date": "yesterday-ish",
-    "average": 3.2,
-    "votes": 51
+    "dateString": "not-a-date",
+    "pollExists": true,
+    "votes": 51,
+    "averageRating": 3.2
   },
   {
-    "average": 4.9,
-    "votes": 7
+    "pollExists": true,
+    "votes": 7,
+    "averageRating": 4.9
+  },
+  {
+    "dateString": "05/30/2026",
+    "pollExists": false,
+    "votes": 0
   },
   "not even an object"
 ]
