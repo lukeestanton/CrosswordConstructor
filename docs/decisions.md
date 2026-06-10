@@ -85,3 +85,40 @@ One origin in the browser, no CORS surface.
 **Register/familiarity lines are derived, not editorial**: familiarity buckets
 the wordlist score; "crosswordese" = ≥100 appearances with score <60;
 "classic" = ≥50 appearances. Heuristics, tunable in `services/entry_stats.py`.
+
+## 2026-06-10 — Slice 3: grid editor
+
+**State architecture: pure reducer, snapshot undo.** All keyboard semantics
+live in `frontend/src/lib/grid/engine.ts` — plain TypeScript, zero React —
+so the spec's navigation table is enforced by fast vitest units
+(`engine.test.ts`, the editor's regression net; Playwright in CI is a thin
+wiring smoke). Undo/redo is a capped stack of whole-state snapshots: grids
+are ≤25×25 so snapshots are trivially cheap, autofill/restore are naturally
+single steps, and mutation-vs-navigation is detected structurally (the
+reducer only replaces arrays it changed), so refused actions and cursor moves
+never pollute history.
+
+**Rendering: SVG.** Crisp hairlines, crop marks, and mono coordinates per the
+drafting register; 625 cells render far under a frame; the print/PDF route
+reuses the same geometry. Canvas would buy nothing at this scale and cost
+accessibility.
+
+**Spec interpretations** (the spec leaves these to the implementer):
+- *Perpendicular arrows* toggle orientation only when the cell has a crossing
+  slot; otherwise they move. A pure toggle + orientation-snap would trap the
+  cursor in single-orientation cells.
+- *Block removal*: the cursor can never sit on a block, so period only places
+  blocks; clicking a block removes it (with twins), undo is the keyboard path.
+- *Rebus keystroke*: Insert (Esc is taken by "return from clue editor");
+  also a button in the stats line.
+- *Lock*: ⌘/Ctrl+L toggles the active slot's lock; only complete slots lock.
+- *Empty cells in .puz exports* serialize as "-" (the format demands a
+  solution char); import maps "-" back to empty.
+- *Autosave conflicts* (409): single-user tool — adopt the server rev and
+  last-writer-wins, no merge UI.
+
+**Formats in-house** (`src/lib/formats/`): .puz codec with full checksum
+suite + GEXT/GRBS/RTBL, byte-level round-trip tested; lenient import (warn,
+never refuse, on bad checksums). .jpz via XML (`@xmldom/xmldom` in node,
+DOMParser in browser — the one new dependency). PDF = print stylesheet on a
+dedicated route; no PDF library until a real need appears.

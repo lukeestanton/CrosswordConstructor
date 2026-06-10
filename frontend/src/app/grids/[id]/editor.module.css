@@ -1,0 +1,327 @@
+.loading {
+  font-style: italic;
+  color: var(--ink-muted);
+}
+
+.editor {
+  /* The drafting register: this surface sits on the plain paper field. */
+  margin-top: calc(-1 * var(--sp-2));
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-4);
+  padding-bottom: var(--sp-3);
+  border-bottom: var(--rule-hair);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-l);
+  background: transparent;
+  border: none;
+  border-bottom: 1px dotted transparent;
+  min-width: 0;
+  flex: 1;
+}
+
+.title:hover,
+.title:focus {
+  border-bottom-color: var(--ink-muted);
+  outline: none;
+}
+
+.title::placeholder {
+  font-style: italic;
+  font-weight: 400;
+  font-family: var(--font-body);
+  color: var(--ink-muted);
+}
+
+.headerStats {
+  display: flex;
+  gap: var(--sp-4);
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22rem;
+  gap: var(--sp-6);
+  margin-top: var(--sp-4);
+}
+
+@media (max-width: 64rem) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* --- Grid column --------------------------------------------------------- */
+
+.annotation {
+  display: flex;
+  gap: var(--sp-4);
+  align-items: baseline;
+  justify-content: flex-end;
+  padding-bottom: var(--sp-2);
+}
+
+.symmetrySelect {
+  background: transparent;
+  border: none;
+  border-bottom: var(--rule-hair);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.violated {
+  color: var(--accent);
+}
+
+.saveState {
+  min-width: 5em;
+  text-align: right;
+}
+
+.gridBox {
+  max-width: 40rem;
+  margin: 0 auto;
+}
+
+.gridFocus {
+  position: relative;
+  outline-offset: 6px;
+}
+
+.rebusInput {
+  position: absolute;
+  background: var(--paper-raised);
+  border: 2px solid var(--accent);
+  padding: 2px 4px;
+  z-index: 2;
+}
+
+.statsLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: baseline;
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: var(--rule-hair);
+  color: var(--ink-muted);
+  font-size: var(--fs-xs);
+}
+
+.statButton {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.statButton:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.statButton:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.notice {
+  color: var(--accent);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.settingsLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  align-items: baseline;
+  margin-top: var(--sp-2);
+}
+
+.settingsLine label {
+  cursor: pointer;
+}
+
+.wordlistNote {
+  opacity: 0.8;
+}
+
+.exportMenu {
+  display: inline-flex;
+  gap: var(--sp-2);
+}
+
+/* --- Side panel ----------------------------------------------------------- */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  border-left: var(--rule-hair);
+  padding-left: var(--sp-5);
+  min-width: 0;
+}
+
+@media (max-width: 64rem) {
+  .panel {
+    border-left: none;
+    padding-left: 0;
+    border-top: var(--rule-hair);
+    padding-top: var(--sp-4);
+  }
+}
+
+.panelBlock h2 {
+  padding-bottom: var(--sp-2);
+}
+
+.slotName {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--fs-l);
+  font-variant: small-caps;
+}
+
+.slotPattern {
+  font-size: var(--fs-xl);
+  letter-spacing: 0.35em;
+  margin: var(--sp-2) 0;
+}
+
+.unknown {
+  color: var(--ink-muted);
+}
+
+.quiet {
+  font-style: italic;
+  color: var(--ink-muted);
+  font-size: var(--fs-s);
+}
+
+/* --- Clue panel ------------------------------------------------------------ */
+
+.clueInput {
+  width: 100%;
+  background: var(--paper-raised);
+  border: none;
+  border-bottom: var(--rule-ink);
+  padding: var(--sp-2);
+  resize: vertical;
+  font-size: var(--fs-m);
+}
+
+.clueMeta {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: baseline;
+  margin-top: var(--sp-1);
+}
+
+.flag {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.clueList {
+  list-style: none;
+  margin-top: var(--sp-3);
+  max-height: 24rem;
+  overflow-y: auto;
+  border-top: var(--rule-hair);
+}
+
+.clueRow {
+  display: grid;
+  grid-template-columns: 2.5rem 6.5rem minmax(0, 1fr) 1rem;
+  gap: var(--sp-2);
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  padding: var(--sp-1) 0;
+  border-bottom: var(--rule-hair);
+}
+
+.clueRowActive {
+  background: var(--accent-tint);
+}
+
+.clueEntry {
+  letter-spacing: 0.1em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clueText {
+  font-size: var(--fs-s);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clueStatus {
+  color: var(--ink-muted);
+}
+
+.clueDone {
+  color: var(--accent);
+}
+
+/* --- Snapshots --------------------------------------------------------------- */
+
+.snapshotForm {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+
+.snapshotName {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  border-bottom: var(--rule-hair);
+  padding: var(--sp-1) 0;
+  font-size: var(--fs-s);
+}
+
+.snapshotList {
+  list-style: none;
+  margin-top: var(--sp-2);
+}
+
+.snapshotRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
+  border-bottom: var(--rule-hair);
+}
+
+.snapshotLabel {
+  font-size: var(--fs-s);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

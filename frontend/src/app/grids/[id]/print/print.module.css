@@ -1,0 +1,88 @@
+.sheet {
+  max-width: 48rem;
+  margin: 0 auto;
+  background: white;
+  color: var(--ink);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-4);
+  padding-bottom: var(--sp-3);
+  border-bottom: var(--rule-ink);
+  margin-bottom: var(--sp-4);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+  flex: 1;
+}
+
+.meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+}
+
+.controls {
+  font-size: var(--fs-s);
+}
+
+.controls button {
+  text-decoration: underline;
+}
+
+.controls a {
+  text-decoration: underline dotted;
+  margin-left: var(--sp-2);
+}
+
+.grid {
+  width: 60%;
+  margin: 0 auto;
+  display: block;
+}
+
+.clueColumns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-6);
+  margin-top: var(--sp-5);
+}
+
+.clueHead {
+  font-family: var(--font-display);
+  font-variant: small-caps;
+  font-size: var(--fs-l);
+  margin-bottom: var(--sp-2);
+}
+
+.clue {
+  font-size: var(--fs-s);
+  padding-left: 1.5em;
+  text-indent: -1.5em;
+  margin-bottom: 2px;
+}
+
+.answer {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+  letter-spacing: 0.08em;
+}
+
+@media print {
+  .controls {
+    display: none;
+  }
+
+  .sheet {
+    max-width: none;
+  }
+
+  .clue {
+    break-inside: avoid;
+  }
+}

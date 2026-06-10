@@ -6,12 +6,13 @@ from fastapi import FastAPI
 
 from .config import settings
 from .db import db_health
-from .routers import clues, entries
+from .routers import clues, entries, grids
 
 app = FastAPI(title="Crossword Constructor API", version="0.1.0")
 
 app.include_router(entries.router)
 app.include_router(clues.router)
+app.include_router(grids.router)
 
 
 @app.get("/health")

@@ -1,0 +1,102 @@
+.svg {
+  width: 100%;
+  height: auto;
+  max-height: calc(100dvh - 14rem);
+  display: block;
+  user-select: none;
+}
+
+.crop {
+  stroke: var(--ink-muted);
+  stroke-width: 1;
+  fill: none;
+}
+
+.coord {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  fill: var(--ink-muted);
+}
+
+.cell {
+  fill: var(--paper-raised);
+}
+
+.cellActive {
+  fill: var(--accent-tint);
+}
+
+.cellCrossing {
+  fill: color-mix(in srgb, var(--accent-tint) 45%, var(--paper-raised));
+}
+
+.cellCursor {
+  fill: color-mix(in srgb, var(--accent-tint) 80%, var(--paper-raised));
+}
+
+.block {
+  fill: var(--ink);
+}
+
+.heat {
+  fill: var(--accent);
+  pointer-events: none;
+}
+
+.grid {
+  stroke: color-mix(in srgb, var(--ink) 45%, var(--paper));
+  stroke-width: 1;
+  fill: none;
+  pointer-events: none;
+}
+
+.number {
+  font-family: var(--font-mono);
+  font-size: 7px;
+  fill: var(--ink-muted);
+  pointer-events: none;
+}
+
+.letter {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  fill: var(--ink);
+  pointer-events: none;
+}
+
+.letterLocked {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  fill: color-mix(in srgb, var(--ink) 72%, var(--paper));
+  pointer-events: none;
+}
+
+.lockMark {
+  fill: var(--ink-muted);
+  pointer-events: none;
+}
+
+.circle {
+  fill: none;
+  stroke: var(--ink-muted);
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+.warnDot {
+  fill: var(--accent);
+  pointer-events: none;
+}
+
+.cursorRing {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cursorRing {
+    transition: x 40ms linear, y 40ms linear;
+  }
+}
