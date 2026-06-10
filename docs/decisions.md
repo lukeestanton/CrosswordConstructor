@@ -198,6 +198,11 @@ Clue-history senses likewise: `GET /api/clue-intel/{answer}` takes
 `limit`/`citations` (0 = all, defaults unchanged at 6×3); the panel shows 4
 and refetches untrimmed on first expansion.
 
+**Word-type filtering (exclude proper nouns etc. from candidates/autofill)
+is designed but deferred** — full design, including the open tag-source
+decision (LLM batch ≈ $10 one-time, recommended) in
+`docs/word-type-filters.md`.
+
 ## 2026-06-10 — Slice 6: solver side
 
 **Every pipeline is fixture-tested, no network in tests** (httpx.MockTransport
