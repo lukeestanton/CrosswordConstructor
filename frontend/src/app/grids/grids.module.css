@@ -1,0 +1,77 @@
+.page {
+  max-width: 46rem;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.newGrid {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: baseline;
+}
+
+.sizeSelect {
+  background: transparent;
+  border: none;
+  border-bottom: var(--rule-hair);
+  padding: var(--sp-1);
+}
+
+.newButton {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  border: 1px solid var(--ink);
+  padding: var(--sp-1) var(--sp-3);
+}
+
+.newButton:hover {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.list {
+  list-style: none;
+  margin-top: var(--sp-5);
+  border-top: var(--rule-hair);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr) 5.5rem 5rem auto;
+  gap: var(--sp-3);
+  align-items: baseline;
+  padding: var(--sp-3) 0;
+  border-bottom: var(--rule-hair);
+}
+
+.rowTitle {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+.untitled {
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-style: italic;
+  color: var(--ink-muted);
+}
+
+.delete {
+  color: var(--ink-muted);
+}
+
+.delete:hover {
+  color: var(--accent);
+}
+
+.empty {
+  margin-top: var(--sp-5);
+  font-style: italic;
+  color: var(--ink-muted);
+}

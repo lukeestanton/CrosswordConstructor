@@ -1,0 +1,70 @@
+/* Design tokens — "The Dictionary".
+ *
+ * The entire visual system derives from these values; no raw colors, sizes,
+ * or font names anywhere else. Derivation: reference-work typography
+ * (Merriam-Webster/OED register) — ink on paper, one restrained accent,
+ * hairline rules, dense but disciplined.
+ *
+ * Faces (chosen deliberately, see docs/decisions.md):
+ *   display  Libre Caslon Text — headwords; the classic dictionary serif.
+ *   body     Source Serif 4   — highly legible at dense settings.
+ *   mono     IBM Plex Mono    — coordinates, dates, scores, patterns.
+ */
+
+:root {
+  /* --- Palette (6 values, the only colors in the system) --- */
+  --paper: #f4f2ed;
+  --paper-raised: #faf9f6;
+  --ink: #1a1815;
+  --ink-muted: #6b6862;
+  --accent: #9b2c1f;
+  --accent-tint: #f0e2de;
+
+  /* --- Type families --- */
+  --font-display: "Libre Caslon Text", "Iowan Old Style", georgia, serif;
+  --font-body: "Source Serif 4 Variable", "Source Serif 4", georgia, serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", menlo, monospace;
+
+  /* --- Type scale --- */
+  --fs-xs: 0.75rem;
+  --fs-s: 0.875rem;
+  --fs-m: 1rem;
+  --fs-l: 1.25rem;
+  --fs-xl: 1.75rem;
+  --fs-xxl: 2.5rem;
+  --fs-display: 4.5rem;
+
+  /* --- Spacing (4px base) --- */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --sp-7: 3rem;
+  --sp-8: 4rem;
+
+  /* --- Rules --- */
+  --rule-hair: 1px solid color-mix(in srgb, var(--ink) 25%, var(--paper));
+  --rule-ink: 1.5px solid var(--ink);
+
+  /* --- Letterspacing for small caps / mono labels --- */
+  --track-caps: 0.12em;
+}
+
+/* Focus: visible always, accent ring, never removed. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

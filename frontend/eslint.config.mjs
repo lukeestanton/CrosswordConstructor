@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated wasm-pack output + the classic worker that loads it.
+    "public/fill/**",
   ]),
 ]);
 

@@ -1,0 +1,65 @@
+.page {
+  max-width: 46rem;
+}
+
+.search {
+  display: block;
+  width: 100%;
+  margin-top: var(--sp-4);
+  padding: var(--sp-3) 0;
+  background: transparent;
+  border: none;
+  border-bottom: var(--rule-ink);
+  font-family: var(--font-display);
+  font-size: var(--fs-xl);
+}
+
+.search::placeholder {
+  color: color-mix(in srgb, var(--ink-muted) 60%, var(--paper));
+  font-size: var(--fs-m);
+  font-family: var(--font-body);
+  font-style: italic;
+}
+
+.results {
+  margin-top: var(--sp-6);
+}
+
+.entryList,
+.clueList {
+  list-style: none;
+  margin-top: var(--sp-3);
+}
+
+.entryRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
+}
+
+.entryWord {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.leader {
+  flex: 1;
+  border-bottom: 1px dotted color-mix(in srgb, var(--ink-muted) 50%, var(--paper));
+  transform: translateY(-0.25em);
+}
+
+.clueRow {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr) auto;
+  gap: var(--sp-3);
+  align-items: baseline;
+  padding: var(--sp-1) 0;
+}
+
+.empty {
+  margin-top: var(--sp-6);
+  font-style: italic;
+  color: var(--ink-muted);
+}

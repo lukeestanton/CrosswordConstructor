@@ -1,0 +1,44 @@
+{
+  "status": "OK",
+  "results": [
+    {
+      "puzzle_id": 21801,
+      "print_date": "2026-06-01",
+      "publish_type": "daily",
+      "version": 0,
+      "format_type": "Normal",
+      "title": "",
+      "author": "Lynn Lempel",
+      "editor": "Will Shortz",
+      "solved": true,
+      "percent_filled": 100,
+      "star": "Gold"
+    },
+    {
+      "puzzle_id": 21802,
+      "print_date": "2026-06-02",
+      "publish_type": "daily",
+      "version": 0,
+      "format_type": "Normal",
+      "title": "",
+      "author": "Daniel Raymon",
+      "editor": "Will Shortz",
+      "solved": false,
+      "percent_filled": 38,
+      "star": null
+    },
+    {
+      "puzzle_id": 21807,
+      "print_date": "2026-06-07",
+      "publish_type": "daily",
+      "version": 0,
+      "format_type": "Normal",
+      "title": "Changing Lanes",
+      "author": "Robyn Weintraub",
+      "editor": "Joel Fagliano",
+      "solved": true,
+      "percent_filled": 100,
+      "star": null
+    }
+  ]
+}
