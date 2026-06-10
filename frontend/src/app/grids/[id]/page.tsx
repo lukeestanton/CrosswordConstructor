@@ -26,6 +26,7 @@ import { symmetryViolated } from "@/lib/grid/engine";
 import type { GridState, Symmetry } from "@/lib/grid/types";
 import { CluePanel } from "./CluePanel";
 import { ExportMenu } from "./ExportMenu";
+import { FillPanel, type FillOverlay } from "./FillPanel";
 import { SnapshotPanel } from "./SnapshotPanel";
 import styles from "./editor.module.css";
 
@@ -47,6 +48,12 @@ export default function GridEditorPage() {
   const [saveState, setSaveState] = useState<SaveState>("loading");
   const [rebusOpen, setRebusOpen] = useState(false);
   const [rebusValue, setRebusValue] = useState("");
+  const [heatOn, setHeatOn] = useState(false);
+  const [fillOverlay, setFillOverlay] = useState<FillOverlay>({
+    heat: null,
+    unfillable: new Set(),
+    contested: new Set(),
+  });
 
   const revRef = useRef(0);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -190,6 +197,9 @@ export default function GridEditorPage() {
         case ".":
           dispatch({ type: "toggleBlock" });
           break;
+        case "`":
+          setHeatOn((on) => !on);
+          break;
         case "Enter":
           clueFocusRef.current();
           break;
@@ -236,8 +246,18 @@ export default function GridEditorPage() {
     for (const d of health.duplicateSlots)
       for (const slot of d.slots)
         for (const p of slot.cells) warn.add(p.r * state.width + p.c);
-    return { warn };
-  }, [state, health]);
+    // Unfillable cells (fill engine channel) join the ambient warning set.
+    for (const idx of fillOverlay.unfillable) warn.add(idx);
+
+    // Heat overlay when toggled; contested slots from a failed autofill are
+    // always shown at full heat until the next analysis clears them.
+    const heat = new Map<number, number>();
+    if (heatOn && fillOverlay.heat) {
+      for (const [idx, h] of fillOverlay.heat) heat.set(idx, h);
+    }
+    for (const idx of fillOverlay.contested) heat.set(idx, 1);
+    return { warn, heat: heat.size > 0 ? heat : undefined };
+  }, [state, health, fillOverlay, heatOn]);
 
   if (!state || !editor || !health) {
     return <p className={styles.loading}>Loading grid…</p>;
@@ -483,13 +503,12 @@ export default function GridEditorPage() {
             )}
           </section>
 
-          <section className={styles.panelBlock}>
-            <h2 className="caps-label">Candidates</h2>
-            <p className={styles.quiet}>
-              The fill engine joins in the next slice — this panel will rank
-              wordlist matches for the active slot.
-            </p>
-          </section>
+          <FillPanel
+            state={state}
+            dispatch={dispatch}
+            heatOn={heatOn}
+            onOverlay={setFillOverlay}
+          />
 
           <CluePanel
             state={state}

@@ -122,3 +122,32 @@ suite + GEXT/GRBS/RTBL, byte-level round-trip tested; lenient import (warn,
 never refuse, on bad checksums). .jpz via XML (`@xmldom/xmldom` in node,
 DOMParser in browser — the one new dependency). PDF = print stylesheet on a
 dedicated route; no PDF library until a real need appears.
+
+## 2026-06-10 — Slice 4: fill engine
+
+**ingrid_core compiles to wasm32 cleanly** — the feared fallbacks (vendored
+fork, server-side fill) were not needed. `rust/fill-wasm` wraps it with
+wasm-bindgen; `npm run build:wasm` (wasm-pack, `no-modules` target) emits
+into `frontend/public/fill/`, loaded by a hand-written classic worker via
+`importScripts` so Next's bundler never touches the wasm. Boring and robust.
+
+**WordList lifecycle**: `generate_grid_config` consumes the WordList, so the
+wrapper parses the 314k-word dict once at init (the expensive step: dupe
+index) and moves the list in/out of each per-request grid config — live
+candidates cost slot-option generation only.
+
+**Honest substitutes** where ingrid exposes no direct feature:
+- *Constraint heat* = per-cell distinct-viable-glyph counts derived from
+  arc-consistency elimination sets (toggle: backquote key — letters all type).
+- *"Where it got stuck"* on autofill failure = the slots with fewest viable
+  options after re-running arc consistency, highlighted on the grid.
+- *Unfillable warnings* = slots with zero post-arc-consistency options,
+  merged into the ambient health channel.
+
+**Cancelation**: single-threaded wasm cannot observe an abort flag, so cancel
+terminates the worker, respawns it, and re-inits from the cached dict text;
+the grid is never touched until success applies one undoable `applyFill`.
+`find_fill`'s own timeout is the backstop.
+
+**Rebus limitation**: the engine sees a rebus cell as its first letter;
+noted in `src/lib/fill/template.ts`.

@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "build:wasm": "cd ../rust/fill-wasm && wasm-pack build --target no-modules --release --out-dir ../../frontend/public/fill --out-name fill_wasm && rm -f ../../frontend/public/fill/.gitignore ../../frontend/public/fill/package.json"
   },
   "dependencies": {
     "@fontsource-variable/source-serif-4": "^5.2.9",

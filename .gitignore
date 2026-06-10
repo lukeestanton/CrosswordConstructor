@@ -27,3 +27,8 @@ frontend/next-env.d.ts
 
 # OS / editor
 .DS_Store
+
+# Rust / wasm build artifacts (npm run build:wasm regenerates public/fill)
+rust/**/target/
+rust/fill-wasm/pkg/
+frontend/public/fill/fill_wasm*
