@@ -2,7 +2,8 @@
 
 A personal one-stop shop for NYT crosswords: a constructor suite (grid editor,
 autofill, clue intelligence) and a solver companion. See [CLAUDE.md](CLAUDE.md)
-for architecture and the design brief, [SPEC.md](SPEC.md) for the grid editor
+for architecture and the design brief,
+[docs/grid-editor-spec.md](docs/grid-editor-spec.md) for the grid editor
 behavior, and [docs/decisions.md](docs/decisions.md) for build-time decisions.
 
 ## Layout
