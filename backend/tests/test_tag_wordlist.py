@@ -49,6 +49,29 @@ def test_validator_recovers_dropped_codes_field():
     assert records["AMBER"].familiarity == 4
 
 
+def test_validator_accepts_trailing_pipe_and_dash_run():
+    # "OPRAH|PN|4|fr|" (stray trailing pipe) and "AMBER|--|4|" (dash run for no
+    # tags) are the two formatting slips that used to fail a whole chunk.
+    records = tp.parse_and_validate(WORDS, "OPRAH|PN|4|en|\nAMBER|--|4|\nATAD|T|2|\n")
+    assert records["OPRAH"].lang == "en"
+    assert records["AMBER"].mask == 0
+
+
+def test_salvage_keeps_good_lines_and_drops_garbled_one():
+    # One garbled word (model mangled ATAD) must not sink the whole chunk.
+    recs, dropped = tp.salvage_parse(WORDS, "OPRAH|PN|4|\nAMBER|-|4|\nATADXX|T|2|\n")
+    assert dropped == 1
+    assert set(recs) == {"OPRAH", "AMBER"}  # ATAD left for a targeted re-tag
+
+
+def test_salvage_collapses_doubled_code_letter():
+    # "SS" (model doubled the plural S) is rejected by the strict parser but
+    # recovered as "S" in salvage mode.
+    recs, dropped = tp.salvage_parse(WORDS, "OPRAH|PN|4|\nAMBER|-|4|\nATAD|TT|2|\n")
+    assert dropped == 0
+    assert recs["ATAD"].mask == tp.mask_from_codes("T")
+
+
 @pytest.mark.parametrize(
     "bad",
     [

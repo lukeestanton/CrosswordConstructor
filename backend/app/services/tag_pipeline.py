@@ -117,62 +117,115 @@ def prompt_sha() -> str:
 LANG_RE = re.compile(r"[a-z]{2,3}")
 
 
-def parse_and_validate(words: list[str], result_text: str) -> dict[str, WordTagRecord]:
-    """Strictly parse one chunk's LLM output. Raises ChunkError on any hard
-    violation so the whole chunk is requeued — truncation shows up as a
-    line-count mismatch."""
-    expected = set(words)
-    lines = [
+_DASHES = {"-", "−", "–", "—"}
+
+
+def _clean_lines(result_text: str) -> list[str]:
+    return [
         ln.strip()
         for ln in result_text.splitlines()
         if ln.strip() and not ln.strip().startswith("```")
     ]
 
-    records: dict[str, WordTagRecord] = {}
-    for line in lines:
-        # Tolerate stray prose and a header echo; truncation is still caught
-        # by the missing-words check, misalignment by unexpected-word below.
-        if "|" not in line or line.upper().startswith("WORD|"):
-            continue
-        fields = line.split("|")
-        if len(fields) == 3:  # tolerate a dropped trailing empty LANG field
-            fields.append("")
-        if len(fields) != 4:
-            raise ChunkError(f"bad field count: {line!r}")
-        word, codes, fam, lang = (f.strip() for f in fields)
-        word = word.upper()
-        # Models love typographic dashes; any lone dash variant (or an empty
-        # field in an otherwise well-formed line) means "no tags".
-        if codes in {"−", "–", "—", ""}:
-            codes = "-"
-        # Dropped-codes shift: "ALOE|2|" puts the familiarity digit in the
-        # codes slot. Codes are always letters, so a lone 0-4 digit there
-        # (with a non-digit next field) can only mean the field is missing.
-        if codes in {"0", "1", "2", "3", "4"} and not fam.isdigit():
-            codes, fam, lang = "-", codes, fam.lower()
-        if word not in expected:
-            raise ChunkError(f"unexpected word: {word!r}")
-        if word in records:
-            raise ChunkError(f"duplicate word: {word!r}")
-        if codes != "-" and (
-            not codes
-            or not set(codes) <= CODE_ALPHABET
-            or len(set(codes)) != len(codes)
-        ):
-            raise ChunkError(f"bad codes for {word}: {codes!r}")
-        if fam not in {"0", "1", "2", "3", "4"}:
-            raise ChunkError(f"bad familiarity for {word}: {fam!r}")
-        lang = lang.lower()
-        if lang and not LANG_RE.fullmatch(lang):
-            raise ChunkError(f"bad lang for {word}: {lang!r}")
-        records[word] = WordTagRecord(
-            codes=codes, familiarity=int(fam), lang=lang or None
-        )
 
+def _parse_line(
+    line: str,
+    expected: set[str],
+    seen: dict[str, WordTagRecord],
+    lenient: bool = False,
+) -> tuple[str, WordTagRecord] | None:
+    """Parse one output line into (word, record). Returns None for skippable
+    non-data lines (prose, header echo). Raises ChunkError on a real violation.
+
+    ``lenient`` only relaxes the *guessable* failures — a doubled code letter is
+    collapsed rather than rejected — for best-effort salvage of already-paid
+    output. The structural coercions below (trailing pipe, dash runs, dropped
+    fields) are always safe and apply in both modes."""
+    # Tolerate stray prose and a header echo; truncation is still caught by the
+    # caller's missing-words check, misalignment by the unexpected-word check.
+    # Match the header by its CODES placeholder, not just a leading "WORD|", so
+    # the real wordlist entry WORD ("WORD|-|4|") still tags.
+    if "|" not in line or line.upper().startswith("WORD|CODES|"):
+        return None
+    fields = line.split("|")
+    # Models often append a stray trailing "|" after LANG ("STREGA|FW|1|it|")
+    # or drop the empty LANG field entirely ("ALOE|2|"). Normalise both.
+    while len(fields) > 4 and fields[-1].strip() == "":
+        fields.pop()
+    if len(fields) == 3:
+        fields.append("")
+    if len(fields) != 4:
+        raise ChunkError(f"bad field count: {line!r}")
+    word, codes, fam, lang = (f.strip() for f in fields)
+    word = word.upper()
+    # Any run of dash variants (or an empty field) means "no tags": "-", "--", "—".
+    if set(codes) <= _DASHES:
+        codes = "-"
+    # Dropped-codes shift: "ALOE|2|" puts the familiarity digit in the codes
+    # slot. Codes are always letters, so a lone 0-4 digit there (with a
+    # non-digit next field) can only mean the field is missing.
+    if codes in {"0", "1", "2", "3", "4"} and not fam.isdigit():
+        codes, fam, lang = "-", codes, fam.lower()
+    if word not in expected:
+        raise ChunkError(f"unexpected word: {word!r}")
+    if word in seen:
+        raise ChunkError(f"duplicate word: {word!r}")
+    if codes != "-":
+        unique = "".join(dict.fromkeys(codes))  # drop a doubled code letter
+        if codes != unique:
+            if not lenient:
+                raise ChunkError(f"bad codes for {word}: {codes!r}")
+            codes = unique
+        if not codes or not set(codes) <= CODE_ALPHABET:
+            raise ChunkError(f"bad codes for {word}: {codes!r}")
+    # The model sometimes skips the mandatory FAM digit on obscure entries,
+    # emitting a lone dash or empty field. That balk *means* "extremely obscure",
+    # so coerce it to 0 rather than failing (and re-running) the whole chunk over
+    # one word — output tokens are the expensive side.
+    if fam in _DASHES or fam == "":
+        fam = "0"
+    if fam not in {"0", "1", "2", "3", "4"}:
+        raise ChunkError(f"bad familiarity for {word}: {fam!r}")
+    lang = lang.lower()
+    if lang and not LANG_RE.fullmatch(lang):
+        raise ChunkError(f"bad lang for {word}: {lang!r}")
+    return word, WordTagRecord(codes=codes, familiarity=int(fam), lang=lang or None)
+
+
+def parse_and_validate(words: list[str], result_text: str) -> dict[str, WordTagRecord]:
+    """Strictly parse one chunk's LLM output. Raises ChunkError on any hard
+    violation so the whole chunk is requeued — truncation shows up as a
+    line-count mismatch."""
+    expected = set(words)
+    records: dict[str, WordTagRecord] = {}
+    for line in _clean_lines(result_text):
+        parsed = _parse_line(line, expected, records)
+        if parsed is not None:
+            records[parsed[0]] = parsed[1]
     missing = expected - records.keys()
     if missing:
         raise ChunkError(f"missing words: {sorted(missing)[:5]}…")
     return records
+
+
+def salvage_parse(
+    words: list[str], result_text: str
+) -> tuple[dict[str, WordTagRecord], int]:
+    """Best-effort parse: keep every valid self-labeled line, drop only the bad
+    ones. Recovers the ~149 good words from a chunk the strict parser threw away
+    over a single garbled line. Returns (records, lines_dropped)."""
+    expected = set(words)
+    records: dict[str, WordTagRecord] = {}
+    dropped = 0
+    for line in _clean_lines(result_text):
+        try:
+            parsed = _parse_line(line, expected, records, lenient=True)
+        except ChunkError:
+            dropped += 1
+            continue
+        if parsed is not None:
+            records[parsed[0]] = parsed[1]
+    return records, dropped
 
 
 # --- claude CLI source -------------------------------------------------------
@@ -381,6 +434,59 @@ def run_api_batch_job(
                     fh.write(f"{word}\tapi-batch retries exhausted\n")
         log(f"quarantined {sum(len(w) for w in pending.values())} words")
     return total_done
+
+
+def run_targeted_retag(
+    client: Any,
+    words: list[str],
+    journal_dir: Path,
+    model: str,
+    *,
+    out_index: int,
+    chunk_size: int = 25,
+    rounds: int = 3,
+    poll_seconds: int = 30,
+    log: Callable[[str], None] = print,
+) -> list[str]:
+    """Re-tag a specific word list in *small* chunks, salvaging every valid line.
+
+    For the long-tail words the model garbled inside dense 150-word chunks: a
+    smaller window plus lenient line-level parsing recovers nearly all. Each
+    round re-chunks only the still-missing words. Recovered records are written
+    to a single journal file at ``out_index`` (keep it clear of the main 5-digit
+    indices so the upsert ingest folds it in without touching the live ledger).
+    Returns the words still untagged after every round."""
+    pending = list(words)
+    recovered: dict[str, WordTagRecord] = {}
+
+    for round_num in range(1, rounds + 1):
+        if not pending:
+            break
+        chunks = dict(enumerate(chunked(pending, chunk_size)))
+        log(f"round {round_num}: {len(pending)} words in {len(chunks)} chunks of {chunk_size}")
+        batch_id = submit_batch(client, chunks, model)
+        log(f"batch {batch_id} submitted; polling every {poll_seconds}s")
+        while True:
+            batch = client.messages.batches.retrieve(batch_id)
+            if batch.processing_status == "ended":
+                break
+            time.sleep(poll_seconds)
+        for result in client.messages.batches.results(batch_id):
+            if result.result.type != "succeeded":
+                continue
+            index = int(result.custom_id.rsplit("-", 1)[1])
+            text_out = next(
+                (b.text for b in result.result.message.content if b.type == "text"),
+                "",
+            )
+            recs, _ = salvage_parse(chunks[index], text_out)
+            recovered.update(recs)
+        pending = [w for w in pending if w not in recovered]
+        log(f"round {round_num}: {len(recovered)} recovered, {len(pending)} still missing")
+
+    if recovered:
+        write_chunk(journal_dir, out_index, recovered)
+    return pending
 
 
 # --- chunking + journal -------------------------------------------------------
