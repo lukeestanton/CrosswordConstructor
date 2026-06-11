@@ -502,7 +502,7 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
         </div>
       )}
       {status === "ready" && active && (moreTags || activeSlotMask !== 0) && (
-        <div className={styles.tagRow} aria-label="This slot's extra exclusions">
+        <div className={styles.tagRow} role="group" aria-label="Slot word-type exclusions">
           <span className={styles.slotTagLabel}>this slot</span>
           {chipRow(
             activeSlotMask,
