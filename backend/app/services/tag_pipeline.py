@@ -137,6 +137,9 @@ def parse_and_validate(words: list[str], result_text: str) -> dict[str, WordTagR
             raise ChunkError(f"bad field count: {line!r}")
         word, codes, fam, lang = (f.strip() for f in fields)
         word = word.upper()
+        # Models love typographic dashes; any lone dash variant means "-".
+        if codes in {"−", "–", "—"}:
+            codes = "-"
         if word not in expected:
             raise ChunkError(f"unexpected word: {word!r}")
         if word in records:

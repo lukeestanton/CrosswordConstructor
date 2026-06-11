@@ -24,6 +24,12 @@ def test_validator_accepts_good_output():
     assert records["ATAD"].lang is None
 
 
+def test_validator_normalizes_unicode_dashes():
+    # Haiku regularly emits U+2212 for the "no tags" sentinel.
+    records = tp.parse_and_validate(WORDS, "OPRAH|PN|4|\nAMBER|−|4|\nATAD|T|2|\n")
+    assert records["AMBER"].mask == 0
+
+
 def test_validator_tolerates_fences_and_dropped_lang_field():
     fenced = "```\nOPRAH|PN|4\nAMBER|-|4\nATAD|T|2\n```"
     records = tp.parse_and_validate(WORDS, fenced)
