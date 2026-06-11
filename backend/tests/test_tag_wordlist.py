@@ -97,6 +97,23 @@ def test_run_job_bisects_then_quarantines(tmp_path):
     assert done >= 1
 
 
+def test_run_job_circuit_breaks_when_source_is_down(tmp_path):
+    # Every call fails (rate-limit window exhausted): the run must abort
+    # resumably, not march every chunk into quarantine.
+    words = {i: [f"W{i:03d}"] for i in range(40)}
+    source = StubSource(poison={f"W{i:03d}" for i in range(40)})
+    done = tp.run_job(
+        words, source, tmp_path, concurrency=2, retries=2, log=lambda m: None
+    )
+    assert done == 0
+    quarantined = (
+        (tmp_path / "failed_words.tsv").read_text().splitlines()
+        if (tmp_path / "failed_words.tsv").exists()
+        else []
+    )
+    assert len(quarantined) < 40  # aborted long before draining the queue
+
+
 def test_manifest_mismatch_aborts(tmp_path):
     manifest = tp.manifest_for("m1", 500, 100, 1)
     tp.check_manifest(tmp_path / "j", manifest, force_restart=False)

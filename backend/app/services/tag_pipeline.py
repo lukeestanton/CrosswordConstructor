@@ -37,27 +37,27 @@ CODE_ALPHABET = set(CODE_TO_BIT)
 # Per-tag prompt lines. Separate from word_tags.TAGS so prompt phrasing can
 # be tuned (the gold-run feedback loop) without touching the canonical table.
 PROMPT_HELP: dict[str, str] = {
-    "PROPER": "proper-noun-ONLY — has NO common-word reading. OPRAH yes; AMBER no (also a color), BILL no, MERCURY no. When in doubt, omit P",
-    "ABBR": "abbreviation, initialism, or grid-style shortening: ATTY, ESTD, SSN. Skip entries that also have a full unabbreviated reading (ETA is a Greek letter)",
-    "PARTIAL": "partial — appears in grids only as a fill-in-the-blank fragment: ATAD, INA, ORSO",
-    "PHRASE": "multiword phrase written solid: PARTYANIMAL, ETPHONEHOME",
-    "FOREIGN": "foreign word not assimilated into English: ETRE, ESSA, ERAT",
-    "PLURAL": "plural or inflected form: OREOS, ERAS, RAN",
-    "NAME": "real person's name (implies P): OPRAH, ARETHA",
-    "PLACE": "place name (implies P): OSLO, AVON",
-    "BRAND": "brand or company (implies P): OREO, ALPO, AMANA",
-    "MEDIA": "title of a work or fictional character (implies P): AIDA, ELSA, NEMO",
+    "PROPER": "proper-noun-ONLY. If the string ALSO reads as an ordinary lowercase word (AMBER the color, CHINA the dishes, BILL, MERCURY the element), give it NO P and NO N/L/B/M. OPRAH yes, OSLO yes. When in doubt, omit P",
+    "ABBR": "abbreviation, initialism, or grid-style shortening: ATTY, ESTD, SSN, FOMO. An initialism that names an organization is also a proper: IRS = PA. Skip entries with a full unabbreviated reading (ETA is a Greek letter)",
+    "PARTIAL": "partial — a phrase fragment that only works as a fill-in-the-blank: ATAD (a tad), INA (one ___ million), ASEC (wait ___), ORSO. These are not abbreviations",
+    "PHRASE": "multiword phrase written solid: PARTYANIMAL, ETPHONEHOME, OPENBAR",
+    "FOREIGN": "foreign-language word English has NOT absorbed: ETRE, ESSA, ERAT, ETE. Absorbed borrowings (AMIGO, TACO) are English — no F",
+    "PLURAL": "plural or inflected form: OREOS, ERAS, EELS, RAN, SMOTE",
+    "NAME": "real person's name (also gets P): OPRAH, ARETHA",
+    "PLACE": "place name (also gets P): OSLO, TULSA",
+    "BRAND": "brand or company (also gets P): OREO, ALPO, AMANA. A place that is also a brand gets both: AVON = PLB",
+    "MEDIA": "title of a work or fictional character (also gets P): AIDA, ELSA, NEMO",
     "ROMAN": "roman numeral: MMXI, CDII",
     "AFFIX": "prefix/suffix/combining form clued as such: NEURO, ENNE, OLOGY",
-    "VARIANT": "variant or nonstandard spelling: AMEBA, TEHEE",
-    "INTERJ": "interjection or onomatopoeia: PSST, TSK, BRR",
-    "LETTERS": "spelled-out letters or letter runs: ESSES, ARS, AEIOU",
-    "CONTRIVED": "contrived made-for-grids coinage nobody actually says (green paint)",
-    "CROSSWORDESE": "crosswordese — survives mainly in grids: ETUI, ADIT, ANOA",
-    "DATED": "dated or old-fashioned term: ERST, HEPCAT",
-    "SLANG": "slang or informal register: BAE, FOMO",
-    "ADULT": "adult/risqué: profanity or sexual content",
-    "GRIM": "grim or unpleasant: disease, death, slur-adjacent",
+    "VARIANT": "nonstandard variant spelling of a more standard form: AMEBA (amoeba), TEHEE (tee-hee), ESTHETE (aesthete). The standard spelling itself (TSAR, AMOEBA) is NOT a variant; nonstandard contractions like AINT are G, not V",
+    "INTERJ": "interjection or onomatopoeia: PSST, TSK, BRR, AHEM",
+    "LETTERS": "spelled-out letters or letter runs: ESSES, ARS, AEIOU, ESS",
+    "CONTRIVED": "green paint / roll-your-own: technically derivable but nobody says or writes it outside a grid — agent nouns like ATONER, ELOPER; RE- verbs like REHEM. Real dictionary-grade words (EATER, REDO) don't count",
+    "CROSSWORDESE": "crosswordese — survives mainly in grids: ETUI, ADIT, ANOA, ASTA, OLEO",
+    "DATED": "dated or old-fashioned in current use: ERST, HEPCAT, DADDYO, OLEO, SMOTE. Stacks with other tags freely",
+    "SLANG": "slang or informal register, any era: BAE, FOMO, YEET, AINT, HEPCAT",
+    "ADULT": "sexual or profane, even mildly: SEXT, PORNO, SMUT",
+    "GRIM": "unpleasant subject matter a family puzzle avoids: disease (TUMOR, ENEMA), death, weapons (SARIN), crime (ARSON)",
 }
 
 
@@ -93,7 +93,7 @@ def build_prompt(words: list[str]) -> str:
 
 For EVERY input word output exactly one line, in the same order, format:
 WORD|CODES|FAM|LANG
-- CODES: the applicable tag letters from the alphabet below, no separators, or "-" if none apply. A word carries EVERY tag that applies.
+- CODES: the applicable tag letters from the alphabet below, no separators, or "-" if none apply. Tags STACK — emit every letter that applies, not just the best one: OREOS is PSB (proper-only brand, plural), FOMO is AG (acronym and slang), OLEO is WD (crosswordese and dated), ESSES is SZ (plural spelled letters).
 - FAM: one digit 0-4 — how familiar the entry is to an average American solver (0 = extremely obscure, 2 = crossword-common, 4 = universal).
 - LANG: lowercase ISO-639-1 code ONLY when F is present (e.g. fr, es, la), otherwise empty.
 Output ONLY these lines: no commentary, no blank lines, no code fences.
@@ -313,6 +313,7 @@ def run_job(
     journal_dir: Path,
     concurrency: int = 4,
     retries: int = 3,
+    max_consecutive_failures: int = 10,
     log: Callable[[str], None] = print,
 ) -> int:
     """Tag every pending chunk, journaling as we go. Returns chunks completed.
@@ -322,8 +323,14 @@ def run_job(
     aborting the run. Sub-chunks journal under synthetic indexes from 10^6 up
     (real indexes are dense from 0, so no collision); if a run dies between a
     bisect and its parent's completion the parent is simply redone — the
-    ingest upsert makes the overlap harmless."""
+    ingest upsert makes the overlap harmless.
+
+    Circuit breaker: `max_consecutive_failures` source errors with no success
+    in between means the source itself is down (rate-limit window exhausted,
+    auth lapsed) — abort resumably instead of churning every pending chunk
+    through retries and into quarantine."""
     synthetic = count(1_000_000)
+    consecutive_failures = 0
     pending = [
         (index, words, 0)
         for index, words in sorted(chunks.items())
@@ -350,6 +357,7 @@ def run_job(
                 try:
                     records = future.result()
                 except ChunkError as exc:
+                    consecutive_failures += 1
                     if attempt + 1 < retries:
                         requeue.append((index, words, attempt + 1))
                         log(f"chunk {index}: retry {attempt + 1} ({exc})")
@@ -364,7 +372,15 @@ def run_job(
                     continue
                 write_chunk(journal_dir, index, records)
                 done += 1
+                consecutive_failures = 0
                 log(f"chunk {index}: ok ({done} done)")
+        if consecutive_failures >= max_consecutive_failures:
+            log(
+                f"aborting after {consecutive_failures} consecutive source "
+                f"failures (rate limit / auth?) — {done}/{len(chunks)} chunks "
+                "journaled; re-run to resume"
+            )
+            return done
         pending = requeue + pending
     return done
 
