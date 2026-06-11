@@ -16,7 +16,7 @@ use ingrid_core::grid_config::{
     generate_grid_config_from_template_string, Direction, OwnedGridConfig,
 };
 use ingrid_core::word_list::{normalize_word, WordList, WordListSourceConfig};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -188,6 +188,64 @@ pub fn set_global_filter(excluded_mask: u32) {
     });
 }
 
+/// Per-slot tag exclusion, identified the same way the client addresses
+/// slots: start cell + direction. `mask` is layered on top of the global
+/// filter (which acts via `Word::hidden`).
+#[derive(Deserialize)]
+struct SlotFilter {
+    x: usize,
+    y: usize,
+    down: bool,
+    mask: u32,
+}
+
+fn parse_slot_filters(json: &str) -> Result<Vec<SlotFilter>, JsError> {
+    if json.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    serde_json::from_str(json).map_err(|e| JsError::new(&format!("bad slot_filters_json: {e}")))
+}
+
+/// Prune each filtered slot's options by tag mask before arc consistency or
+/// search runs, so per-slot exclusions propagate through crossings, autofill,
+/// health, and verification. Fully specified slots are skipped: their single
+/// (possibly hidden-placeholder) option is the typed fill, which filters
+/// never invalidate.
+fn apply_slot_filters(config: &mut OwnedGridConfig, filters: &[SlotFilter]) {
+    if filters.is_empty() {
+        return;
+    }
+    WORD_TAGS.with(|tags| {
+        let tags = tags.borrow();
+        for f in filters {
+            if f.mask == 0 {
+                continue;
+            }
+            let direction = if f.down { Direction::Down } else { Direction::Across };
+            let Some(slot_id) = config
+                .slot_configs
+                .iter()
+                .position(|sc| sc.start_cell == (f.x, f.y) && sc.direction == direction)
+            else {
+                continue;
+            };
+            let sc = &config.slot_configs[slot_id];
+            if sc.complete_fill(&config.fill, config.width).is_some() {
+                continue;
+            }
+            let len = sc.length;
+            let words = &config.word_list.words[len];
+            config.slot_options[slot_id].retain(|&word_id| {
+                let mask = tags
+                    .get(&words[word_id].normalized_string)
+                    .copied()
+                    .unwrap_or(0);
+                mask & f.mask == 0
+            });
+        }
+    });
+}
+
 /// Run `f` with a grid config built from the template, recovering the word
 /// list afterward regardless of outcome.
 fn with_config<T>(
@@ -216,8 +274,10 @@ fn slot_report(config: &OwnedGridConfig, slot_id: usize, options: usize) -> Slot
 }
 
 #[wasm_bindgen]
-pub fn analyze(template: &str, min_score: u16) -> Result<JsValue, JsError> {
+pub fn analyze(template: &str, min_score: u16, slot_filters_json: &str) -> Result<JsValue, JsError> {
+    let filters = parse_slot_filters(slot_filters_json)?;
     let result = with_config(template, min_score, |config| {
+        apply_slot_filters(config, &filters);
         let cfg = config.to_config_ref();
         let width = config.width;
         let height = config.height;
@@ -283,11 +343,15 @@ pub fn candidates(
     slot_y: usize,
     slot_down: bool,
     limit: usize,
+    slot_filters_json: &str,
 ) -> Result<JsValue, JsError> {
-    let result = candidates_inner(template, min_score, slot_x, slot_y, slot_down, limit)?;
+    let result = candidates_inner(
+        template, min_score, slot_x, slot_y, slot_down, limit, slot_filters_json,
+    )?;
     Ok(serde_wasm_bindgen::to_value(&result)?)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn candidates_inner(
     template: &str,
     min_score: u16,
@@ -295,8 +359,11 @@ fn candidates_inner(
     slot_y: usize,
     slot_down: bool,
     limit: usize,
+    slot_filters_json: &str,
 ) -> Result<CandidatesResult, JsError> {
+    let filters = parse_slot_filters(slot_filters_json)?;
     with_config(template, min_score, |config| {
+        apply_slot_filters(config, &filters);
         let cfg = config.to_config_ref();
         let direction = if slot_down { Direction::Down } else { Direction::Across };
         let Some(slot_id) = config
@@ -341,8 +408,13 @@ fn candidates_inner(
 /// timeout or backtrack budget — the UI must treat it like unverified, never
 /// like unfillable.
 #[wasm_bindgen]
-pub fn check_fillable(template: &str, min_score: u16, timeout_ms: u32) -> Result<JsValue, JsError> {
-    let verdict = check_fillable_inner(template, min_score, timeout_ms)?;
+pub fn check_fillable(
+    template: &str,
+    min_score: u16,
+    timeout_ms: u32,
+    slot_filters_json: &str,
+) -> Result<JsValue, JsError> {
+    let verdict = check_fillable_inner(template, min_score, timeout_ms, slot_filters_json)?;
     Ok(serde_wasm_bindgen::to_value(&verdict)?)
 }
 
@@ -350,8 +422,11 @@ fn check_fillable_inner(
     template: &str,
     min_score: u16,
     timeout_ms: u32,
+    slot_filters_json: &str,
 ) -> Result<&'static str, JsError> {
+    let filters = parse_slot_filters(slot_filters_json)?;
     with_config(template, min_score, |config| {
+        apply_slot_filters(config, &filters);
         let cfg = config.to_config_ref();
         match find_fill(&cfg, Some(Duration::from_millis(u64::from(timeout_ms)))) {
             Ok(_) => "fillable",
@@ -362,8 +437,15 @@ fn check_fillable_inner(
 }
 
 #[wasm_bindgen]
-pub fn autofill(template: &str, min_score: u16, timeout_ms: u32) -> Result<JsValue, JsError> {
+pub fn autofill(
+    template: &str,
+    min_score: u16,
+    timeout_ms: u32,
+    slot_filters_json: &str,
+) -> Result<JsValue, JsError> {
+    let filters = parse_slot_filters(slot_filters_json)?;
     let result = with_config(template, min_score, |config| {
+        apply_slot_filters(config, &filters);
         let cfg = config.to_config_ref();
         match find_fill(&cfg, Some(Duration::from_millis(u64::from(timeout_ms)))) {
             Ok(success) => {
@@ -483,11 +565,11 @@ mod tests {
     #[test]
     fn candidates_report_total_independent_of_limit() {
         init();
-        let full = candidates_inner("b..\n...\n...", 0, 0, 0, false, 60).unwrap();
+        let full = candidates_inner("b..\n...\n...", 0, 0, 0, false, 60, "").unwrap();
         assert!(full.total >= full.items.len());
         assert_eq!(full.total, full.items.len()); // tiny dict: all fit in 60
 
-        let one = candidates_inner("b..\n...\n...", 0, 0, 0, false, 1).unwrap();
+        let one = candidates_inner("b..\n...\n...", 0, 0, 0, false, 1, "").unwrap();
         assert_eq!(one.items.len(), 1);
         assert_eq!(one.total, full.total); // limit pages the list, not the count
     }
@@ -508,9 +590,9 @@ mod tests {
     #[test]
     fn check_fillable_proves_verdicts() {
         init();
-        assert_eq!(check_fillable_inner("b..\n...\n...", 0, 5000).unwrap(), "fillable");
+        assert_eq!(check_fillable_inner("b..\n...\n...", 0, 5000, "").unwrap(), "fillable");
         // 'x' satisfies no crossing in this dict: a proven dead end.
-        assert_eq!(check_fillable_inner("x..\n...\n...", 0, 5000).unwrap(), "unfillable");
+        assert_eq!(check_fillable_inner("x..\n...\n...", 0, 5000, "").unwrap(), "unfillable");
     }
 
     #[test]
@@ -555,7 +637,7 @@ mod tests {
         assert!(!filtered.contains(&"BIT".to_string()));
         assert_eq!(filtered.len(), before.len() - 1);
         // And through the public candidates path:
-        let cands = candidates_inner("b..\n...\n...", 0, 0, 0, false, 60).unwrap();
+        let cands = candidates_inner("b..\n...\n...", 0, 0, 0, false, 60, "").unwrap();
         assert!(!cands.items.iter().any(|c| c.word == "BIT"));
 
         set_global_filter(0); // relax: un-hides
@@ -570,9 +652,9 @@ mod tests {
         // Across (0,0) on "b.t" must be BIT or BAT; tag and exclude both.
         set_word_tags("BIT;1\nBAT;1\n");
         set_global_filter(1);
-        assert_eq!(check_fillable_inner("b.t\n...\n...", 0, 5000).unwrap(), "unfillable");
+        assert_eq!(check_fillable_inner("b.t\n...\n...", 0, 5000, "").unwrap(), "unfillable");
         set_global_filter(0);
-        assert_eq!(check_fillable_inner("b.t\n...\n...", 0, 5000).unwrap(), "fillable");
+        assert_eq!(check_fillable_inner("b.t\n...\n...", 0, 5000, "").unwrap(), "fillable");
     }
 
     #[test]
@@ -582,7 +664,42 @@ mod tests {
         set_global_filter(1);
         // Fully typed valid square containing the excluded word: still valid,
         // because complete slots bypass `hidden`.
-        assert_eq!(check_fillable_inner("bit\none\nwan", 0, 5000).unwrap(), "fillable");
+        assert_eq!(check_fillable_inner("bit\none\nwan", 0, 5000, "").unwrap(), "fillable");
+    }
+
+    #[test]
+    fn per_slot_filter_scopes_to_one_slot() {
+        init();
+        set_word_tags("BIT;1\n");
+        let across_filter = r#"[{"x":0,"y":0,"down":false,"mask":1}]"#;
+
+        let across = candidates_inner("...\n...\n...", 0, 0, 0, false, 60, across_filter).unwrap();
+        assert!(!across.items.iter().any(|c| c.word == "BIT"));
+
+        // Same request addressed at the down slot: BIT still offered there.
+        let down = candidates_inner("...\n...\n...", 0, 0, 0, true, 60, across_filter).unwrap();
+        assert!(down.items.iter().any(|c| c.word == "BIT"));
+    }
+
+    #[test]
+    fn per_slot_filter_propagates_to_fill() {
+        init();
+        // Across (0,0) on "b.t" must be BIT or BAT; a per-slot exclusion of
+        // both proves the grid unfillable, while other slots are untouched.
+        set_word_tags("BIT;1\nBAT;1\n");
+        let filter = r#"[{"x":0,"y":0,"down":false,"mask":1}]"#;
+        assert_eq!(check_fillable_inner("b.t\n...\n...", 0, 5000, filter).unwrap(), "unfillable");
+        assert_eq!(check_fillable_inner("b.t\n...\n...", 0, 5000, "").unwrap(), "fillable");
+    }
+
+    #[test]
+    fn per_slot_filter_skips_fully_typed_slots() {
+        init();
+        set_word_tags("BIT;1\n");
+        // Row 0 fully typed with the excluded word: the per-slot filter must
+        // not invalidate typed fill.
+        let filter = r#"[{"x":0,"y":0,"down":false,"mask":1}]"#;
+        assert_eq!(check_fillable_inner("bit\n...\n...", 0, 5000, filter).unwrap(), "fillable");
     }
 
     #[test]
@@ -590,9 +707,9 @@ mod tests {
         init();
         // A typed row not in the dict adds a hidden placeholder to the
         // resident list; a filter walk must not surface it.
-        let _ = check_fillable_inner("zzz\n...\n...", 0, 100);
+        let _ = check_fillable_inner("zzz\n...\n...", 0, 100, "");
         set_global_filter(0);
-        let result = candidates_inner("...\n...\n...", 0, 0, 0, false, 60).unwrap();
+        let result = candidates_inner("...\n...\n...", 0, 0, 0, false, 60, "").unwrap();
         assert!(!result.items.iter().any(|c| c.word == "ZZZ"));
     }
 
