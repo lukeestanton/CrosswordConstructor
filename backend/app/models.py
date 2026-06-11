@@ -218,6 +218,36 @@ class RexPost(Base):
     summary_raw: Mapped[str | None] = mapped_column(Text)
 
 
+class WordTag(Base):
+    """Machine-produced word-type tags (see services/word_tags.py for the
+    taxonomy). One row per normalized wordlist entry that received tags or
+    sidecar data; corrections go in WordTagOverride, never here."""
+
+    __tablename__ = "word_tags"
+
+    word: Mapped[str] = mapped_column(Text, primary_key=True)  # A–Z uppercase
+    mask: Mapped[int] = mapped_column(Integer)
+    familiarity: Mapped[int | None] = mapped_column(Integer)  # 0..4
+    lang: Mapped[str | None] = mapped_column(Text)  # ISO 639-1, FOREIGN only
+    gloss: Mapped[str | None] = mapped_column(Text)  # reserved for later pass
+    source: Mapped[str] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime.datetime] = mapped_column(default=datetime.datetime.utcnow)
+
+
+class WordTagOverride(Base):
+    """Manual full-replacement mask per word (0 clears all tags); merged over
+    word_tags via COALESCE at read time."""
+
+    __tablename__ = "word_tag_overrides"
+
+    word: Mapped[str] = mapped_column(Text, primary_key=True)
+    mask: Mapped[int] = mapped_column(Integer)
+    familiarity: Mapped[int | None] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime.datetime] = mapped_column(default=datetime.datetime.utcnow)
+
+
 class Digest(Base):
     """Cached spoiler-free LLM digests, one per puzzle date."""
 
