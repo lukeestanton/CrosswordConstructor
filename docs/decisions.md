@@ -288,3 +288,39 @@ first proven layout ~7s after match, full settle ~9s.
 **Quick Start owns its own FillClient**, lazily booted on panel expand and
 disposed on collapse — the editor is never open on /grids, so the only cost
 is one extra dict parse behind a visible loading state.
+
+## Word-type filters (2026-06-11)
+
+**Taxonomy: 21 bits, not the doc's 6.** Tagging is a one-time LLM pass over
+314k words; adding a tag later means re-running everything, so we tagged
+generously up front: the Crossword Six plus proper subtypes
+(NAME/PLACE/BRAND/MEDIA), form tags (ROMAN/AFFIX/VARIANT/INTERJ/LETTERS),
+quality tags (CONTRIVED/CROSSWORDESE/DATED/SLANG), and content tags
+(ADULT/GRIM), with familiarity (0–4) and lang sidecars. Bits stay ≤ 30 (JS
+bitwise is 32-bit signed). Three hand-synced constant tables (Python/TS/Rust)
+guarded by a regex parity test. The journal stores letter codes, not masks,
+so even renumbering is recoverable without re-tagging.
+
+**Tag semantics: any excluded bit hides the word; dual identity lives in
+the tag definition.** PROPER means proper-noun-ONLY — AMBER (also a color)
+is never tagged, so "no propers" keeps it while killing OPRAH. A ~100-word
+hand-labeled gold set (with dual-identity traps) gates prompt changes:
+first run 75% exact, post-tuning 90–91%.
+
+**Tag source: claude CLI first, Batches API for the remainder.** The
+subscription-CLI path works but is structurally expensive: each `claude -p`
+call pays a ~23k-token session prompt (cache write + read), a hidden
+title side-call, full non-batch prices — and, until disabled via
+MAX_THINKING_TOKENS=0, ~17k thinking tokens per chunk (6× latency and
+spend, no measured accuracy delta on the gold set). Net ~5–10× the cost of
+the Batches API for identical output. Words A–~MU (1,375 chunks) came from
+the CLI run; the rest go through `--source api-batch` (50% pricing, ~$3.50).
+The journal file format is the producer-agnostic contract. Lessons encoded
+in the pipeline: run nested CLIs from a scratch cwd (project hooks fire per
+call), strict per-chunk validation with retry→bisect→quarantine, a
+consecutive-failure circuit breaker for rate-limit windows, and ≤150-word
+chunks (Haiku truncates beyond ~200 lines).
+
+**Gloss column reserved, not populated.** A per-word micro-definition would
+~3× output volume; it's purely additive later (targeted pass over
+corpus-less words) and needs no migration or re-tagging.
