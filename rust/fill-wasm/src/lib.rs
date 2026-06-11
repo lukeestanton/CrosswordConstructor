@@ -15,15 +15,16 @@ use ingrid_core::backtracking_search::{find_fill, FillFailure};
 use ingrid_core::grid_config::{
     generate_grid_config_from_template_string, Direction, OwnedGridConfig,
 };
-use ingrid_core::word_list::{WordList, WordListSourceConfig};
+use ingrid_core::word_list::{normalize_word, WordList, WordListSourceConfig};
 use serde::Serialize;
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
 
 thread_local! {
     static WORD_LIST: RefCell<Option<WordList>> = const { RefCell::new(None) };
+    static WORD_TAGS: RefCell<HashMap<String, u32>> = RefCell::new(HashMap::new());
 }
 
 const MAX_WORD_LENGTH: usize = 21;
@@ -110,6 +111,81 @@ pub fn init_wordlist(dict_text: &str) -> usize {
     );
     WORD_LIST.with(|cell| *cell.borrow_mut() = Some(list));
     count
+}
+
+/// Word-type tag bits, hand-synced with backend/app/services/word_tags.py and
+/// frontend/src/lib/fill/tags.ts; backend/tests/test_word_tag_constants.py
+/// parses this table and fails on drift. Bits must stay <= 30 because masks
+/// round-trip through JS, whose bitwise ops are 32-bit signed.
+pub const TAG_TABLE: &[(&str, u32, char)] = &[
+    ("PROPER", 0, 'P'),
+    ("ABBR", 1, 'A'),
+    ("PARTIAL", 2, 'T'),
+    ("PHRASE", 3, 'H'),
+    ("FOREIGN", 4, 'F'),
+    ("PLURAL", 5, 'S'),
+    ("NAME", 6, 'N'),
+    ("PLACE", 7, 'L'),
+    ("BRAND", 8, 'B'),
+    ("MEDIA", 9, 'M'),
+    ("ROMAN", 10, 'R'),
+    ("AFFIX", 11, 'X'),
+    ("VARIANT", 12, 'V'),
+    ("INTERJ", 13, 'J'),
+    ("LETTERS", 14, 'Z'),
+    ("CONTRIVED", 15, 'C'),
+    ("CROSSWORDESE", 16, 'W'),
+    ("DATED", 17, 'D'),
+    ("SLANG", 18, 'G'),
+    ("ADULT", 19, 'U'),
+    ("GRIM", 20, 'K'),
+];
+
+/// Parse "WORD;mask" lines into the resident tag map, replacing any previous
+/// map. Keys are normalized like wordlist entries so lookups by
+/// `Word::normalized_string` hit. Returns the entry count.
+#[wasm_bindgen]
+pub fn set_word_tags(tags_text: &str) -> usize {
+    let map: HashMap<String, u32> = tags_text
+        .lines()
+        .filter_map(|line| {
+            let (word, mask) = line.trim().split_once(';')?;
+            let key = normalize_word(word.trim());
+            if key.is_empty() {
+                return None;
+            }
+            Some((key, mask.trim().parse::<u32>().ok()?))
+        })
+        .collect();
+    let count = map.len();
+    WORD_TAGS.with(|cell| *cell.borrow_mut() = map);
+    count
+}
+
+/// Hide every wordlist entry carrying an excluded tag. The assignment is
+/// unconditional so relaxing the mask un-hides; engine-added placeholder
+/// words (`source_index: None`, born hidden) are skipped so they can never
+/// leak into suggestions — and fully typed slots keep their word regardless,
+/// because `generate_slot_options` bypasses `hidden` for complete slots:
+/// filters constrain suggestions, never typed fill.
+#[wasm_bindgen]
+pub fn set_global_filter(excluded_mask: u32) {
+    WORD_TAGS.with(|tags| {
+        let tags = tags.borrow();
+        WORD_LIST.with(|cell| {
+            if let Some(list) = cell.borrow_mut().as_mut() {
+                for bucket in &mut list.words {
+                    for word in bucket.iter_mut() {
+                        if word.source_index.is_some() {
+                            let mask =
+                                tags.get(&word.normalized_string).copied().unwrap_or(0);
+                            word.hidden = mask & excluded_mask != 0;
+                        }
+                    }
+                }
+            }
+        });
+    });
 }
 
 /// Run `f` with a grid config built from the template, recovering the word
@@ -435,6 +511,89 @@ mod tests {
         assert_eq!(check_fillable_inner("b..\n...\n...", 0, 5000).unwrap(), "fillable");
         // 'x' satisfies no crossing in this dict: a proven dead end.
         assert_eq!(check_fillable_inner("x..\n...\n...", 0, 5000).unwrap(), "unfillable");
+    }
+
+    #[test]
+    fn tag_table_bits_and_codes_are_unique() {
+        let mut bits = HashSet::new();
+        let mut codes = HashSet::new();
+        let mut names = HashSet::new();
+        for &(name, bit, code) in TAG_TABLE {
+            assert!(bit <= 30, "bit {bit} for {name} exceeds the JS-safe ceiling");
+            assert!(bits.insert(bit));
+            assert!(codes.insert(code));
+            assert!(names.insert(name));
+        }
+    }
+
+    #[test]
+    fn global_filter_hides_tagged_candidates_and_relaxes() {
+        init();
+        assert_eq!(set_word_tags("BIT;1\nNAB;2\n"), 2);
+
+        // Raw slot options (pre-arc-consistency) show the hidden flag directly.
+        let across_options = || {
+            with_config("b..\n...\n...", 0, |config| {
+                let slot = config
+                    .slot_configs
+                    .iter()
+                    .position(|sc| sc.start_cell == (0, 0) && sc.direction == Direction::Across)
+                    .unwrap();
+                config.slot_options[slot]
+                    .iter()
+                    .map(|&w| config.word_list.words[3][w].canonical_string.to_uppercase())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap()
+        };
+
+        let before = across_options();
+        assert!(before.contains(&"BIT".to_string()));
+
+        set_global_filter(1); // exclude PROPER
+        let filtered = across_options();
+        assert!(!filtered.contains(&"BIT".to_string()));
+        assert_eq!(filtered.len(), before.len() - 1);
+        // And through the public candidates path:
+        let cands = candidates_inner("b..\n...\n...", 0, 0, 0, false, 60).unwrap();
+        assert!(!cands.items.iter().any(|c| c.word == "BIT"));
+
+        set_global_filter(0); // relax: un-hides
+        let relaxed = across_options();
+        assert!(relaxed.contains(&"BIT".to_string()));
+        assert_eq!(relaxed.len(), before.len());
+    }
+
+    #[test]
+    fn filter_can_prove_unfillable() {
+        init();
+        // Across (0,0) on "b.t" must be BIT or BAT; tag and exclude both.
+        set_word_tags("BIT;1\nBAT;1\n");
+        set_global_filter(1);
+        assert_eq!(check_fillable_inner("b.t\n...\n...", 0, 5000).unwrap(), "unfillable");
+        set_global_filter(0);
+        assert_eq!(check_fillable_inner("b.t\n...\n...", 0, 5000).unwrap(), "fillable");
+    }
+
+    #[test]
+    fn typed_fill_survives_excluded_tag() {
+        init();
+        set_word_tags("BIT;1\n");
+        set_global_filter(1);
+        // Fully typed valid square containing the excluded word: still valid,
+        // because complete slots bypass `hidden`.
+        assert_eq!(check_fillable_inner("bit\none\nwan", 0, 5000).unwrap(), "fillable");
+    }
+
+    #[test]
+    fn placeholder_words_never_unhide() {
+        init();
+        // A typed row not in the dict adds a hidden placeholder to the
+        // resident list; a filter walk must not surface it.
+        let _ = check_fillable_inner("zzz\n...\n...", 0, 100);
+        set_global_filter(0);
+        let result = candidates_inner("...\n...\n...", 0, 0, 0, false, 60).unwrap();
+        assert!(!result.items.iter().any(|c| c.word == "ZZZ"));
     }
 
     #[test]
