@@ -91,6 +91,49 @@ class EntryYearCount(Base):
     count: Mapped[int] = mapped_column(Integer)
 
 
+class Layout(Base):
+    """A unique black-square pattern mined from published NYT grids.
+    ``pattern`` is '\\n'-joined rows of '#'/'.'; ``usage_count`` is how many
+    puzzles share it. Derived data — rebuilt wholesale by build_layouts."""
+
+    __tablename__ = "layouts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    pattern: Mapped[str] = mapped_column(Text, unique=True)
+    word_count: Mapped[int] = mapped_column(Integer)
+    block_count: Mapped[int] = mapped_column(Integer)
+    max_slot_len: Mapped[int] = mapped_column(Integer)
+    mean_slot_len: Mapped[float] = mapped_column()
+    usage_count: Mapped[int] = mapped_column(Integer)
+    first_used: Mapped[datetime.date | None] = mapped_column(Date)
+    last_used: Mapped[datetime.date | None] = mapped_column(Date)
+    sample_xdid: Mapped[str | None] = mapped_column(Text)
+
+    slot_lengths: Mapped[list["LayoutSlotLength"]] = relationship(
+        back_populates="layout"
+    )
+
+    __table_args__ = (Index("ix_layouts_size_pop", "width", "height", "usage_count"),)
+
+
+class LayoutSlotLength(Base):
+    """Slot-length signature row: how many across/down slots of ``length``
+    a layout has. Backs the multiset matching query for must-include words."""
+
+    __tablename__ = "layout_slot_lengths"
+
+    layout_id: Mapped[int] = mapped_column(ForeignKey("layouts.id"), primary_key=True)
+    length: Mapped[int] = mapped_column(Integer, primary_key=True)
+    across_count: Mapped[int] = mapped_column(Integer)
+    down_count: Mapped[int] = mapped_column(Integer)
+
+    layout: Mapped[Layout] = relationship(back_populates="slot_lengths")
+
+    __table_args__ = (Index("ix_lsl_length", "length", "across_count"),)
+
+
 class IngestState(Base):
     """Key/value bookkeeping so long ingestion runs are resumable."""
 

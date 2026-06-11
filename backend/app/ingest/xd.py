@@ -59,6 +59,8 @@ class ParsedPuzzle:
     copyright: str | None = None
     width: int | None = None
     height: int | None = None
+    # Raw grid rows ('#' block, anything else a letter cell), if present.
+    grid: list[str] | None = None
     # (direction 'A'/'D', number, clue_text, normalized_answer)
     clues: list[tuple[str, int | None, str, str]] = field(default_factory=list)
 
@@ -126,6 +128,7 @@ def parse_xd(text_content: str, xdid: str) -> ParsedPuzzle:
                 grid_idx = i
                 puzzle.height = len(sec)
                 puzzle.width = len(sec[0])
+                puzzle.grid = sec
                 break
 
     # Clues: every remaining section's lines that match the clue shape.
