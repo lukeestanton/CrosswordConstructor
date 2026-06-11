@@ -324,3 +324,26 @@ chunks (Haiku truncates beyond ~200 lines).
 **Gloss column reserved, not populated.** A per-word micro-definition would
 ~3× output volume; it's purely additive later (targeted pass over
 corpus-less words) and needs no migration or re-tagging.
+
+**Filter UI: a two-scope ledger, not duplicated chip rows.** The original
+chip-row sketch predates the 21-tag taxonomy; disclosed, it rendered the
+full set twice (global + slot) — 42 undifferentiated chips. Now: collapsed,
+one quiet row of the six core chips (global scope) plus any non-core global
+exclusion, and a "this slot" line that appears only when the active slot has
+exclusions; "more" discloses a ledger where each tag appears exactly once,
+grouped under italic field labels (core/proper nouns/form/quality/content),
+with an `all | slot` toggle-cell pair per row. No modes, no duplication;
+state shape and dispatches unchanged. Considered and rejected: a scope
+*switch* over one chip panel (modal — easy to toggle in the wrong scope).
+
+**Gitignored wasm artifacts get a freshness guard, twice.** The fill
+engine's `public/fill/fill_wasm.js` is a build output, so pulling new
+`rust/fill-wasm` code does not refresh it — and a stale build made the
+filter ops fail as "not a function" inside the worker, silently swallowed
+by the advisory-error catches: filters no-opped with zero signal. Guards:
+(1) the worker's `init` op returns `{count, hasFilters}` and the panel
+prints a visible "engine build is stale — run npm run build:wasm" note when
+filter support is missing (FillClient also skips filter ops then, keeping
+the console clean); (2) `predev` runs `scripts/check-wasm.mjs`, an
+mtime comparison that warns loudly but never blocks (dev must boot without
+the Rust toolchain). CI is unaffected — it always rebuilds the wasm.

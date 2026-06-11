@@ -61,6 +61,8 @@ const globalChips = (page: Page) =>
   page.getByRole("group", { name: "Excluded word types" });
 const slotChips = (page: Page) =>
   page.getByRole("group", { name: "Slot word-type exclusions" });
+const ledger = (page: Page) =>
+  page.getByRole("group", { name: "Word-type exclusions" });
 
 test("excluding a tag removes its candidates; relaxing restores them", async ({
   page,
@@ -111,17 +113,27 @@ test("a per-slot exclusion affects only its slot", async ({ page }) => {
     timeout: 20_000,
   });
 
-  // Disclose the full taxonomy; the active slot's chip row appears with it.
+  // Disclose the ledger and strike PROPER in the slot column only.
   await globalChips(page).getByRole("button", { name: "more", exact: true }).click();
-  await slotChips(page).getByRole("button", { name: "proper", exact: true }).click();
+  await ledger(page)
+    .getByRole("button", { name: "proper — exclude in this slot" })
+    .click();
   await expect(candList(page).filter({ hasText: "BIT" })).toHaveCount(0);
   await expect(candList(page).filter({ hasText: "BOW" })).toHaveCount(1);
+
+  // Collapsing the ledger leaves the exclusion visible on the quiet
+  // "this slot" line (and removable from it).
+  await globalChips(page).getByRole("button", { name: "less", exact: true }).click();
+  await expect(
+    slotChips(page).getByRole("button", { name: "proper", exact: true }),
+  ).toBeVisible();
 
   // Perpendicular toggle: the down slot at (0,0) has no such exclusion.
   await surface.press("ArrowUp");
   await expect(candList(page).filter({ hasText: "BIT" })).toHaveCount(1, {
     timeout: 20_000,
   });
+  await expect(slotChips(page)).toHaveCount(0);
 });
 
 test("filters survive an autofill cancel (worker respawn replays them)", async ({

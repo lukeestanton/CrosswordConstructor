@@ -74,6 +74,9 @@ export class FillClient {
   private nextId = 1;
   /** Words loaded, set after init. */
   wordCount = 0;
+  /** False when the wasm build predates the filter ops (init handshake) —
+   * the UI must say so; silent no-op filters are how stale builds hide. */
+  filtersSupported = true;
   /** Word-type filter state. It lives in the wasm module, not per-request
    * params, so it must survive every worker resurrection: re-applied at the
    * end of init() (which cancel()'s terminate+respawn path calls) and chained
@@ -118,8 +121,9 @@ export class FillClient {
   private ensureVerifyReady(): Promise<void> {
     if (!this.verifyReady) {
       if (this.dict === null) return Promise.reject(new Error("init() first"));
-      this.verifyReady = this.verifyRequest<number>("init", { dict: this.dict })
+      this.verifyReady = this.verifyRequest<unknown>("init", { dict: this.dict })
         .then(async () => {
+          if (!this.filtersSupported) return;
           if (this.tagsText !== null) {
             await this.verifyRequest("setTags", { tags: this.tagsText });
           }
@@ -152,8 +156,15 @@ export class FillClient {
       if (!res.ok) throw new Error(`wordlist fetch failed: ${res.status}`);
       this.dict = await res.text();
     }
-    this.wordCount = await this.request<number>("init", { dict: this.dict });
-    if (this.tagsText !== null) {
+    const boot = await this.request<number | { count: number; hasFilters: boolean }>(
+      "init",
+      { dict: this.dict },
+    );
+    // A bare number is a pre-handshake worker: same vintage problem the
+    // handshake exists to catch.
+    this.wordCount = typeof boot === "number" ? boot : boot.count;
+    this.filtersSupported = typeof boot === "number" ? false : boot.hasFilters;
+    if (this.tagsText !== null && this.filtersSupported) {
       await this.request("setTags", { tags: this.tagsText });
       await this.request("setGlobalFilter", { mask: this.globalMask });
     }
@@ -166,6 +177,7 @@ export class FillClient {
    * stay a no-op. */
   async setTags(tags: string): Promise<void> {
     this.tagsText = tags;
+    if (!this.filtersSupported) return;
     if (this.worker) {
       await this.request("setTags", { tags });
       if (this.globalMask !== 0) {
@@ -186,6 +198,7 @@ export class FillClient {
   /** Set the global exclusion mask on both workers; 0 relaxes everything. */
   async setGlobalFilter(mask: number): Promise<void> {
     this.globalMask = mask;
+    if (!this.filtersSupported) return;
     if (this.worker) await this.request("setGlobalFilter", { mask });
     if (this.verifyReady) {
       await this.ensureVerifyReady().catch(() => undefined);

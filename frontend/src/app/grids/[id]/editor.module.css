@@ -374,6 +374,73 @@
   font-style: italic;
 }
 
+/* Two-scope filter ledger ("more"): every tag exactly once, grouped under
+ * italic field labels, with an [all | slot] pair of toggle cells per row —
+ * a reference-table register, no duplicated chip rows. */
+.tagLedger {
+  margin-top: var(--sp-1);
+}
+
+.ledgerRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.ledgerLabel {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+/* Globally excluded: same struck ink as an excluded chip / dead candidate. */
+.ledgerLabelOff {
+  color: var(--ink);
+  text-decoration: line-through;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px;
+}
+
+.ledgerHead,
+.ledgerCell {
+  width: 2.75em;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ledgerHead {
+  font-style: italic;
+  color: var(--ink-faint, var(--ink-muted));
+}
+
+.ledgerCell {
+  color: var(--ink-muted);
+}
+
+.ledgerCell:hover {
+  color: var(--accent);
+}
+
+.ledgerCellOn {
+  color: var(--accent);
+}
+
+.ledgerGroup {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-style: italic;
+  color: var(--ink-faint, var(--ink-muted));
+  margin-top: var(--sp-1);
+}
+
 .candList {
   list-style: none;
   margin-top: var(--sp-2);

@@ -1,6 +1,6 @@
 # Word-type filters — design
 
-Status: **implemented 2026-06-11.** Built as designed, with two deltas:
+Status: **implemented 2026-06-11.** Built as designed, with three deltas:
 (1) the tag *source* (§3) is the local `claude` CLI on the personal-account
 connection — `backend/scripts/tag_wordlist.py`, resumable journal under
 `backend/data/word_tags/` — not the Message Batches API; (2) the taxonomy
@@ -8,7 +8,13 @@ grew from six to 21 bits (proper subtypes NAME/PLACE/BRAND/MEDIA; form tags
 ROMAN/AFFIX/VARIANT/INTERJ/LETTERS; quality tags CONTRIVED/CROSSWORDESE/
 DATED/SLANG; content tags ADULT/GRIM) plus familiarity/lang sidecar columns
 — canonical table in `backend/app/services/word_tags.py`, drift-guarded by
-`backend/tests/test_word_tag_constants.py`.
+`backend/tests/test_word_tag_constants.py`; (3) §7's chip-row UI didn't
+survive the 21-tag taxonomy (two rows × 21 chips when disclosed) — replaced
+2026-06-11 by a **two-scope ledger**: collapsed, one quiet row of the six
+core chips (global) plus a "this slot" line listing only active slot
+exclusions; "more" discloses each tag exactly once, grouped under italic
+field labels, with an `all | slot` toggle-cell pair per row. Same state,
+same dispatches; see `docs/decisions.md`.
 
 ## 1. Goal & semantics
 
