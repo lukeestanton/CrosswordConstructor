@@ -20,6 +20,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from itertools import count
@@ -125,11 +126,13 @@ def parse_and_validate(words: list[str], result_text: str) -> dict[str, WordTagR
         for ln in result_text.splitlines()
         if ln.strip() and not ln.strip().startswith("```")
     ]
-    if len(lines) != len(words):
-        raise ChunkError(f"expected {len(words)} lines, got {len(lines)}")
 
     records: dict[str, WordTagRecord] = {}
     for line in lines:
+        # Tolerate stray prose and a header echo; truncation is still caught
+        # by the missing-words check, misalignment by unexpected-word below.
+        if "|" not in line or line.upper().startswith("WORD|"):
+            continue
         fields = line.split("|")
         if len(fields) == 3:  # tolerate a dropped trailing empty LANG field
             fields.append("")
@@ -137,9 +140,15 @@ def parse_and_validate(words: list[str], result_text: str) -> dict[str, WordTagR
             raise ChunkError(f"bad field count: {line!r}")
         word, codes, fam, lang = (f.strip() for f in fields)
         word = word.upper()
-        # Models love typographic dashes; any lone dash variant means "-".
-        if codes in {"−", "–", "—"}:
+        # Models love typographic dashes; any lone dash variant (or an empty
+        # field in an otherwise well-formed line) means "no tags".
+        if codes in {"−", "–", "—", ""}:
             codes = "-"
+        # Dropped-codes shift: "ALOE|2|" puts the familiarity digit in the
+        # codes slot. Codes are always letters, so a lone 0-4 digit there
+        # (with a non-digit next field) can only mean the field is missing.
+        if codes in {"0", "1", "2", "3", "4"} and not fam.isdigit():
+            codes, fam, lang = "-", codes, fam.lower()
         if word not in expected:
             raise ChunkError(f"unexpected word: {word!r}")
         if word in records:
@@ -180,11 +189,17 @@ class ClaudeCliTagSource:
         timeout: int = 240,
         claude_bin: str = "claude",
         run_fn: Callable = subprocess.run,
+        cwd: str | None = None,
     ) -> None:
         self.model = model
         self.timeout = timeout
         self.claude_bin = claude_bin
         self.run_fn = run_fn
+        # Neutral cwd, NEVER the repo: inside a project the CLI loads its
+        # context and runs configured hooks per call — measured at ~20x the
+        # latency of the bare call (a stop hook was feeding git feedback
+        # into every tagging session).
+        self.cwd = cwd or tempfile.gettempdir()
 
     def _call(self, prompt: str) -> str:
         # When this script itself runs inside a Claude Code session, the
@@ -194,6 +209,10 @@ class ClaudeCliTagSource:
             for k, v in os.environ.items()
             if k != "CLAUDE_CODE_INCLUDE_PARTIAL_MESSAGES"
         }
+        # Tagging is a straight classification pass: extended thinking adds
+        # ~17k hidden tokens per chunk (6x the latency and the spend) for no
+        # measured accuracy gain — keep it off.
+        env["MAX_THINKING_TOKENS"] = "0"
         try:
             proc = self.run_fn(
                 [
@@ -209,6 +228,7 @@ class ClaudeCliTagSource:
                 text=True,
                 timeout=self.timeout,
                 env=env,
+                cwd=self.cwd,
             )
         except subprocess.TimeoutExpired as exc:
             raise ChunkError(f"claude CLI timed out after {self.timeout}s") from exc

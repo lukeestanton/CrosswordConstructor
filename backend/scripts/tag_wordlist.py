@@ -69,7 +69,14 @@ def main() -> int:
         words = sorted(gold)
         predicted: dict[str, tp.WordTagRecord] = {}
         for chunk in tp.chunked(words, args.chunk_size):
-            predicted.update(source.tag_chunk(chunk))
+            for attempt in range(args.retries):
+                try:
+                    predicted.update(source.tag_chunk(chunk))
+                    break
+                except tp.ChunkError as exc:
+                    log(f"sample chunk retry {attempt + 1}: {exc}")
+            else:
+                raise SystemExit("gold sample failed repeatedly")
         print(tp.evaluate(gold, predicted).format())
         return 0
 

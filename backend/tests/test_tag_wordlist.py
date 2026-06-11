@@ -36,6 +36,19 @@ def test_validator_tolerates_fences_and_dropped_lang_field():
     assert len(records) == 3
 
 
+def test_validator_tolerates_header_echo_and_prose():
+    noisy = "Here are the tags:\nWORD|CODES|FAM|LANG\n" + GOOD
+    records = tp.parse_and_validate(WORDS, noisy)
+    assert len(records) == 3
+
+
+def test_validator_recovers_dropped_codes_field():
+    # "AMBER|4|" = familiarity in the codes slot; codes are always letters.
+    records = tp.parse_and_validate(WORDS, "OPRAH|PN|4|\nAMBER|4|\nATAD|T|2|\n")
+    assert records["AMBER"].mask == 0
+    assert records["AMBER"].familiarity == 4
+
+
 @pytest.mark.parametrize(
     "bad",
     [
@@ -46,7 +59,6 @@ def test_validator_tolerates_fences_and_dropped_lang_field():
         "OPRAH|PN|4|\nAMBER|-|4|\nATAD|TT|2|\n",  # duplicated code
         "OPRAH|PN|4|\nAMBER|-|4|\nATAD|T|9|\n",  # familiarity out of range
         "OPRAH|PN|4|\nAMBER|-|4|\nATAD|T|2|french\n",  # bad lang
-        "OPRAH|PN|4|\nAMBER|-|4|\nATAD||2|\n",  # empty codes (must be '-')
     ],
 )
 def test_validator_rejects(bad):
