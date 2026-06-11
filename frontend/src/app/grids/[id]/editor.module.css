@@ -335,6 +335,45 @@
   gap: var(--sp-2);
 }
 
+/* Word-type filter chips: borderless letter-spaced caps labels in the
+ * status-line register — no checkbox soup. An excluded tag is struck
+ * through, the same ink used for proven-dead candidates. */
+.tagRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-2);
+  margin-top: var(--sp-1);
+}
+
+.tagChip {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.tagChip:hover {
+  color: var(--accent);
+}
+
+.tagChipOn {
+  color: var(--ink);
+  text-decoration: line-through;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px;
+}
+
+.slotTagLabel {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint, var(--ink-muted));
+  font-style: italic;
+}
+
 .candList {
   list-style: none;
   margin-top: var(--sp-2);

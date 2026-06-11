@@ -160,13 +160,26 @@ export class FillClient {
     return this.wordCount;
   }
 
-  /** Load WORD;mask tag lines into both workers; remembered for replays. */
+  /** Load WORD;mask tag lines into both workers; remembered for replays.
+   * Re-applies the current mask afterward — hidden flags only move on
+   * setGlobalFilter, so a mask applied before tags arrived would otherwise
+   * stay a no-op. */
   async setTags(tags: string): Promise<void> {
     this.tagsText = tags;
-    if (this.worker) await this.request("setTags", { tags });
+    if (this.worker) {
+      await this.request("setTags", { tags });
+      if (this.globalMask !== 0) {
+        await this.request("setGlobalFilter", { mask: this.globalMask });
+      }
+    }
     if (this.verifyReady) {
       await this.ensureVerifyReady().catch(() => undefined);
-      if (this.verifyWorker) await this.verifyRequest("setTags", { tags });
+      if (this.verifyWorker) {
+        await this.verifyRequest("setTags", { tags });
+        if (this.globalMask !== 0) {
+          await this.verifyRequest("setGlobalFilter", { mask: this.globalMask });
+        }
+      }
     }
   }
 

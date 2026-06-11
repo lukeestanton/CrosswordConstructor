@@ -12,8 +12,14 @@ import type { FillVerdict } from "./client";
 const CAP = 2000;
 const cache = new Map<string, FillVerdict>();
 
-export function verdictKey(cutoff: number, probeTemplate: string): string {
-  return `${cutoff}|${probeTemplate}`;
+export function verdictKey(
+  cutoff: number,
+  filterSig: string,
+  probeTemplate: string,
+): string {
+  // filterSig folds in the global + per-slot tag masks: changing any filter
+  // lands on fresh keys, which is the whole invalidation story.
+  return `${cutoff}|${filterSig}|${probeTemplate}`;
 }
 
 export function getVerdict(key: string): FillVerdict | undefined {
