@@ -117,13 +117,13 @@ pub fn init_wordlist(dict_text: &str) -> usize {
 fn with_config<T>(
     template: &str,
     min_score: u16,
-    f: impl FnOnce(&OwnedGridConfig) -> T,
+    f: impl FnOnce(&mut OwnedGridConfig) -> T,
 ) -> Result<T, JsError> {
     let list = WORD_LIST
         .with(|cell| cell.borrow_mut().take())
         .ok_or_else(|| JsError::new("wordlist not initialized"))?;
-    let config = generate_grid_config_from_template_string(list, template, min_score);
-    let result = f(&config);
+    let mut config = generate_grid_config_from_template_string(list, template, min_score);
+    let result = f(&mut config);
     WORD_LIST.with(|cell| *cell.borrow_mut() = Some(config.word_list));
     Ok(result)
 }
