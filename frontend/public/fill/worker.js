@@ -24,7 +24,15 @@ self.onmessage = async (event) => {
     let result;
     switch (op) {
       case "init":
-        result = wasm_bindgen.init_wordlist(args.dict);
+        // Capability handshake: fill_wasm.js is a gitignored build artifact,
+        // so it can lag this file's ops. Reporting support lets the host fail
+        // loudly instead of filters silently no-opping on a stale build.
+        result = {
+          count: wasm_bindgen.init_wordlist(args.dict),
+          hasFilters:
+            typeof wasm_bindgen.set_word_tags === "function" &&
+            typeof wasm_bindgen.set_global_filter === "function",
+        };
         break;
       case "setTags":
         result = wasm_bindgen.set_word_tags(args.tags);

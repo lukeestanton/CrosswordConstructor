@@ -8,7 +8,7 @@
  * undoable applyFill; failure highlights the most contested slots.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FillClient,
   type AnalyzeResult,
@@ -102,7 +102,9 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   const template = useMemo(() => gridToTemplate(state), [state]);
   const active = activeSlot(state);
   const slotKey = active?.key ?? null;
-  const [moreTags, setMoreTags] = useState(false);
+  const [ledgerOpen, setLedgerOpen] = useState(false);
+  /** True when the wasm build predates the filter ops (init handshake). */
+  const [engineStale, setEngineStale] = useState(false);
 
   // --- word-type filters ---------------------------------------------------
   const excludedTags = state.settings.excludedTags;
@@ -146,6 +148,7 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
       .then(async (n) => {
         if (!alive) return;
         setWordCount(n);
+        setEngineStale(!client.filtersSupported);
         // Tags land before "ready" so the first candidates pass already
         // reflects a persisted filter; an empty/missing tag file is fine.
         const tags = await fetchWordtags();
@@ -374,27 +377,116 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysis, allDead, slotKey]);
 
-  // --- tag chips -----------------------------------------------------------
-  // Collapsed: the six core tags plus any non-core tag currently excluded
-  // (so an active exclusion is always visible and removable); "more"
-  // discloses the full taxonomy for both rows.
-  const chipRow = (mask: number, onToggle: (bit: number) => void, scope: string) =>
-    TAGS.filter(
-      (t: TagDef) => moreTags || t.group === "core" || mask & (1 << t.bit),
-    ).map((t) => {
-      const on = (mask & (1 << t.bit)) !== 0;
-      return (
-        <button
-          key={`${scope}-${t.name}`}
-          className={on ? `${styles.tagChip} ${styles.tagChipOn}` : styles.tagChip}
-          aria-pressed={on}
-          title={on ? `${t.label}: excluded — click to allow` : `exclude ${t.label}`}
-          onClick={() => onToggle(1 << t.bit)}
-        >
-          {t.label}
-        </button>
-      );
+  // --- word-type filter UI -------------------------------------------------
+  // Collapsed: one quiet row of the six core tags (global scope) plus any
+  // non-core tag currently excluded globally, and — only when present — a
+  // second line listing the active slot's exclusions. "more" replaces the
+  // chips with the ledger: each of the 21 tags exactly once, grouped under
+  // italic field labels, with an [all | slot] toggle column pair.
+  const toggleGlobal = (bit: number) =>
+    dispatch({
+      type: "setSettings",
+      settings: { excludedTags: excludedTags ^ bit },
     });
+  const toggleSlot = (bit: number) => {
+    if (!active) return;
+    dispatch({ type: "setSlotFilter", key: active.key, mask: activeSlotMask ^ bit });
+  };
+
+  const collapsedChips = TAGS.filter(
+    (t: TagDef) => t.group === "core" || excludedTags & (1 << t.bit),
+  ).map((t) => {
+    const on = (excludedTags & (1 << t.bit)) !== 0;
+    return (
+      <button
+        key={t.name}
+        className={on ? `${styles.tagChip} ${styles.tagChipOn}` : styles.tagChip}
+        aria-pressed={on}
+        title={on ? `${t.label}: excluded — click to allow` : `exclude ${t.label}`}
+        onClick={() => toggleGlobal(1 << t.bit)}
+      >
+        {t.label}
+      </button>
+    );
+  });
+
+  const slotExclusionChips = TAGS.filter((t: TagDef) => activeSlotMask & (1 << t.bit)).map(
+    (t) => (
+      <button
+        key={t.name}
+        className={`${styles.tagChip} ${styles.tagChipOn}`}
+        aria-pressed={true}
+        title={`${t.label}: excluded in this slot — click to allow`}
+        onClick={() => toggleSlot(1 << t.bit)}
+      >
+        {t.label}
+      </button>
+    ),
+  );
+
+  const ledgerGroups: { group: TagDef["group"]; label: string }[] = [
+    { group: "core", label: "core" },
+    { group: "proper-subtype", label: "proper nouns" },
+    { group: "form", label: "form" },
+    { group: "quality", label: "quality" },
+    { group: "content", label: "content" },
+  ];
+
+  const ledgerCell = (
+    tag: TagDef,
+    on: boolean,
+    scopeLabel: string,
+    onToggle: () => void,
+  ) => (
+    <button
+      className={on ? `${styles.ledgerCell} ${styles.ledgerCellOn}` : styles.ledgerCell}
+      aria-pressed={on}
+      aria-label={`${tag.label} — exclude ${scopeLabel}`}
+      title={
+        on
+          ? `${tag.label}: excluded ${scopeLabel} — click to allow`
+          : `exclude ${tag.label} ${scopeLabel}`
+      }
+      onClick={onToggle}
+    >
+      {on ? "×" : "·"}
+    </button>
+  );
+
+  const ledger = (
+    <div className={styles.tagLedger} role="group" aria-label="Word-type exclusions">
+      <div className={styles.ledgerRow} aria-hidden="true">
+        <span className={styles.ledgerLabel} />
+        <span className={styles.ledgerHead}>all</span>
+        {active && <span className={styles.ledgerHead}>slot</span>}
+      </div>
+      {ledgerGroups.map(({ group, label }) => (
+        <Fragment key={group}>
+          <p className={styles.ledgerGroup}>{label}</p>
+          {TAGS.filter((t) => t.group === group).map((t) => {
+            const bit = 1 << t.bit;
+            const globalOn = (excludedTags & bit) !== 0;
+            const slotOn = (activeSlotMask & bit) !== 0;
+            return (
+              <div key={t.name} className={styles.ledgerRow}>
+                <span
+                  className={
+                    globalOn
+                      ? `${styles.ledgerLabel} ${styles.ledgerLabelOff}`
+                      : styles.ledgerLabel
+                  }
+                >
+                  {t.label}
+                </span>
+                {ledgerCell(t, globalOn, "everywhere", () => toggleGlobal(bit))}
+                {active && ledgerCell(t, slotOn, "in this slot", () => toggleSlot(bit))}
+              </div>
+            );
+          })}
+        </Fragment>
+      ))}
+    </div>
+  );
 
   // --- actions -----------------------------------------------------------
   const accept = useCallback(
@@ -481,39 +573,30 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
         </span>
       </div>
 
+      {status === "ready" && engineStale && (
+        <p className={styles.deadNote}>
+          fill engine build is stale — word-type filters are inactive; run npm
+          run build:wasm
+        </p>
+      )}
       {status === "ready" && (
         <div className={styles.tagRow} role="group" aria-label="Excluded word types">
-          {chipRow(
-            excludedTags,
-            (bit) =>
-              dispatch({
-                type: "setSettings",
-                settings: { excludedTags: excludedTags ^ bit },
-              }),
-            "global",
-          )}
+          <span className={styles.slotTagLabel}>exclude</span>
+          {!ledgerOpen && collapsedChips}
           <button
             className={`${styles.statButton} data`}
-            aria-expanded={moreTags}
-            onClick={() => setMoreTags((m) => !m)}
+            aria-expanded={ledgerOpen}
+            onClick={() => setLedgerOpen((o) => !o)}
           >
-            {moreTags ? "less" : "more"}
+            {ledgerOpen ? "less" : "more"}
           </button>
         </div>
       )}
-      {status === "ready" && active && (moreTags || activeSlotMask !== 0) && (
+      {status === "ready" && ledgerOpen && ledger}
+      {status === "ready" && !ledgerOpen && active && activeSlotMask !== 0 && (
         <div className={styles.tagRow} role="group" aria-label="Slot word-type exclusions">
           <span className={styles.slotTagLabel}>this slot</span>
-          {chipRow(
-            activeSlotMask,
-            (bit) =>
-              dispatch({
-                type: "setSlotFilter",
-                key: active.key,
-                mask: activeSlotMask ^ bit,
-              }),
-            "slot",
-          )}
+          {slotExclusionChips}
         </div>
       )}
 
