@@ -33,7 +33,7 @@ import type {
   Slot,
   Symmetry,
 } from "./types";
-import { emptyLetter } from "./types";
+import { emptyLetter, normalizeGridState } from "./types";
 
 export type ArrowDir = "up" | "down" | "left" | "right";
 
@@ -56,6 +56,7 @@ export type Action =
   | { type: "setClueStatus"; key: string; status: ClueStatus }
   | { type: "selectSlot"; key: string }
   | { type: "setSettings"; settings: Partial<Settings> }
+  | { type: "setSlotFilter"; key: string; mask: number }
   | { type: "setTitle"; title: string }
   | {
       type: "applyFill";
@@ -582,12 +583,23 @@ export function reduce(state: GridState, action: Action): GridState {
     }
     case "setSettings":
       return { ...state, settings: { ...state.settings, ...action.settings } };
+    case "setSlotFilter": {
+      if ((state.slotFilters[action.key] ?? 0) === action.mask) return state;
+      const slotFilters = { ...state.slotFilters };
+      if (action.mask === 0) delete slotFilters[action.key];
+      else slotFilters[action.key] = action.mask;
+      return { ...state, slotFilters };
+    }
     case "setTitle":
       return { ...state, title: action.title };
     case "applyFill":
       return applyFill(state, action.cells);
     case "restore":
-      return ensureCursor({ ...action.payload, nudge: state.nudge, notice: null });
+      return ensureCursor({
+        ...normalizeGridState(action.payload),
+        nudge: state.nudge,
+        notice: null,
+      });
   }
 }
 

@@ -23,7 +23,7 @@ import {
 } from "@/lib/grid/history";
 import { activeSlot, slotEntry } from "@/lib/grid/slots";
 import { symmetryViolated } from "@/lib/grid/engine";
-import type { GridState, Symmetry } from "@/lib/grid/types";
+import { normalizeGridState, type GridState, type Symmetry } from "@/lib/grid/types";
 import { CluePanel } from "./CluePanel";
 import { ExportMenu } from "./ExportMenu";
 import { FillPanel, type FillOverlay } from "./FillPanel";
@@ -75,7 +75,7 @@ export default function GridEditorPage() {
       const res = await fetch(`/api/grids/${gridId}`);
       if (!res.ok || cancelled) return;
       const data = await res.json();
-      const state = JSON.parse(data.payload) as GridState;
+      const state = normalizeGridState(JSON.parse(data.payload) as GridState);
       revRef.current = data.rev;
       savedRef.current = state;
       setEditor(makeEditor(state));

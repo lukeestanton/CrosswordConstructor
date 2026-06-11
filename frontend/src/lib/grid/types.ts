@@ -37,6 +37,9 @@ export interface Settings {
   skipFilled: boolean;
   /** After completing a slot, jump to the next incomplete slot (NYT solver). */
   autoAdvanceSlot: boolean;
+  /** Global word-type exclusion mask (bits per lib/fill/tags.ts); 0 = off.
+   * Constrains suggestions and autofill, never letters already typed. */
+  excludedTags: number;
 }
 
 export type ClueStatus = "empty" | "draft" | "done";
@@ -67,6 +70,9 @@ export interface GridState {
   nudge: number;
   /** Non-blocking notice from the last action (resize truncation etc.). */
   notice: string | null;
+  /** Per-slot extra tag exclusions layered on settings.excludedTags, keyed
+   * like `clues` by slot identity; absent key = no extra exclusions. */
+  slotFilters: Record<string, number>;
 }
 
 export interface Slot {
@@ -102,10 +108,21 @@ export function makeGridState(width = 15, height = 15): GridState {
     cells: Array.from({ length: width * height }, emptyLetter),
     cursor: { r: 0, c: 0, orient: "across" },
     symmetry: "rotational",
-    settings: { skipFilled: false, autoAdvanceSlot: false },
+    settings: { skipFilled: false, autoAdvanceSlot: false, excludedTags: 0 },
     clues: {},
     title: "",
     nudge: 0,
     notice: null,
+    slotFilters: {},
+  };
+}
+
+/** Fill in fields that predate a stored payload (older grids lack the
+ * word-type filter state); used on every payload deserialization. */
+export function normalizeGridState(state: GridState): GridState {
+  return {
+    ...state,
+    settings: { ...makeGridState().settings, ...state.settings },
+    slotFilters: state.slotFilters ?? {},
   };
 }
