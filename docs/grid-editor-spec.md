@@ -57,7 +57,7 @@ The editor treats the fill engine as a service with two modes:
 - **Candidates panel (continuous)**: for the active slot, a ranked list of wordlist entries matching the current pattern, scored, and filtered to candidates whose crossings remain viable. The list updates live as the cursor moves and as letters are typed, and must never make typing feel slower — if computation lags, the list lags, never the keystroke. Selecting a candidate (click or keyboard) writes it into the slot as a single undoable action. Each candidate displays its wordlist score; the design reserves space for a corpus freshness indicator (appearance count / last-seen year) to be wired in later.
 - **Autofill (on demand)**: fill the whole grid or a selected region, respecting locked entries and existing letters. Runs without freezing the editor, shows that it is working, and is cancelable at any moment with the grid restored to its pre-fill state. On success, the result is one undo step. On failure, report *where* it got stuck (the most contested area) rather than a bare failure message — this is the editor's single most valuable piece of feedback to a constructor.
 
-Word list management (loading, merging, score cutoffs, personal additions) exists but its UI is out of scope for this spec; the editor only needs a visible indication of which list is active and the score cutoff in effect.
+Word list management (loading, merging, score cutoffs, personal additions) exists but its UI is out of scope for this spec; the editor only needs a visible indication of which list is active, the score cutoff in effect, and any active word-type filters (global and per-slot).
 
 ## Clue editor
 
