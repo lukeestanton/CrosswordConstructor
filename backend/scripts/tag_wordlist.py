@@ -36,6 +36,13 @@ def main() -> int:
     parser.add_argument("--dict", type=Path, default=DEFAULT_DICT)
     parser.add_argument("--journal-dir", type=Path, default=DEFAULT_JOURNAL)
     parser.add_argument("--model", default="claude-haiku-4-5")
+    parser.add_argument(
+        "--source",
+        choices=["cli", "api-batch"],
+        default="cli",
+        help="cli = local claude CLI on the account connection; "
+        "api-batch = Anthropic Message Batches (50%% off, key from .env)",
+    )
     parser.add_argument("--chunk-size", type=int, default=500)
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--timeout", type=int, default=240, help="seconds per chunk call")
@@ -93,27 +100,50 @@ def main() -> int:
         log(f"≈{n / args.concurrency * 70 / 3600:.1f}h at concurrency {args.concurrency} (~70s/chunk)")
         return 0
 
-    log("preflighting CLI auth…")
-    source.preflight()
-    log("preflight ok")
-
     manifest = tp.manifest_for(args.model, args.chunk_size, len(words), len(chunk_lists))
     tp.check_manifest(args.journal_dir, manifest, args.force_restart)
 
-    done = tp.run_job(
-        chunks,
-        source,
-        args.journal_dir,
-        concurrency=args.concurrency,
-        retries=args.retries,
-        log=log,
-    )
+    if args.source == "api-batch":
+        api_key = tp.load_api_key(BACKEND.parent / ".env")
+        if not api_key:
+            raise SystemExit(
+                "no ANTHROPIC_API_KEY in .env — the batch source deliberately "
+                "ignores the process environment (it may hold a session-proxy "
+                "credential); add the real key to the repo-root .env"
+            )
+        pending = sum(
+            1 for i in chunks if not tp.chunk_path(args.journal_dir, i).exists()
+        )
+        est = pending * (args.chunk_size * 2 + 900) * 0.5e-6 + pending * (
+            args.chunk_size * 10
+        ) * 2.5e-6
+        log(f"{pending} pending chunks -> est ≈${est:.2f} at batch prices")
+        done = tp.run_api_batch_job(
+            tp.api_batch_client(api_key),
+            chunks,
+            args.journal_dir,
+            args.model,
+            rounds=args.retries,
+            log=log,
+        )
+    else:
+        log("preflighting CLI auth…")
+        source.preflight()
+        log("preflight ok")
+        done = tp.run_job(
+            chunks,
+            source,
+            args.journal_dir,
+            concurrency=args.concurrency,
+            retries=args.retries,
+            log=log,
+        )
     log(f"{done}/{len(chunks)} chunks journaled")
 
     if not args.no_ingest:
         from app.db import engine
 
-        n = tp.ingest_journal(engine, args.journal_dir, "claude-cli", args.model)
+        n = tp.ingest_journal(engine, args.journal_dir, args.source, args.model)
         log(f"ingested {n} records")
     return 0
 

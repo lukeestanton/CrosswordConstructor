@@ -132,6 +132,89 @@ def test_run_job_circuit_breaks_when_source_is_down(tmp_path):
     assert len(quarantined) < 40  # aborted long before draining the queue
 
 
+class _Obj:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+class FakeBatchClient:
+    """Scripted Message Batches client: each submitted chunk succeeds with
+    valid output unless its first word is poisoned (then returns garbage)."""
+
+    def __init__(self, poison: set[str] | None = None):
+        self.poison = poison or set()
+        self.batches_submitted: list[dict[int, list[str]]] = []
+        self._last: dict[int, list[str]] = {}
+        outer = self
+
+        class _Batches:
+            def create(self, requests):
+                chunks = {}
+                for req in requests:
+                    index = int(req["custom_id"].rsplit("-", 1)[1])
+                    # Recover the word list from the prompt tail.
+                    prompt = req["params"]["messages"][0]["content"]
+                    words = prompt.rsplit("Words:\n", 1)[1].split("\n")
+                    chunks[index] = words
+                outer.batches_submitted.append(chunks)
+                outer._last = chunks
+                return _Obj(id=f"batch_{len(outer.batches_submitted)}")
+
+            def retrieve(self, batch_id):
+                return _Obj(
+                    processing_status="ended",
+                    request_counts=_Obj(processing=0, succeeded=0, errored=0),
+                )
+
+            def results(self, batch_id):
+                for index, words in sorted(outer._last.items()):
+                    if words[0] in outer.poison:
+                        text = "garbage output"
+                    else:
+                        text = "\n".join(f"{w}|-|2|" for w in words)
+                    yield _Obj(
+                        custom_id=f"chunk-{index}",
+                        result=_Obj(
+                            type="succeeded",
+                            message=_Obj(content=[_Obj(type="text", text=text)]),
+                        ),
+                    )
+
+        self.messages = _Obj(batches=_Batches())
+
+
+def test_api_batch_job_journals_and_retries(tmp_path):
+    chunks = {0: ["AAA", "BBB"], 1: ["CCC"], 2: ["DDD"]}
+    client = FakeBatchClient(poison={"CCC"})
+    done = tp.run_api_batch_job(
+        client, chunks, tmp_path, "m", rounds=2, poll_seconds=0, log=lambda m: None
+    )
+    assert done == 2
+    assert tp.chunk_path(tmp_path, 0).exists()
+    assert tp.chunk_path(tmp_path, 2).exists()
+    # Poisoned chunk retried each round, then quarantined.
+    assert len(client.batches_submitted) == 2
+    assert set(client.batches_submitted[1]) == {1}
+    failed = (tmp_path / "failed_words.tsv").read_text()
+    assert "CCC" in failed
+
+    # Resume: journaled chunks aren't resubmitted.
+    client2 = FakeBatchClient()
+    done2 = tp.run_api_batch_job(
+        client2, chunks, tmp_path, "m", rounds=1, poll_seconds=0, log=lambda m: None
+    )
+    assert done2 == 3
+    assert set(client2.batches_submitted[0]) == {1}
+
+
+def test_load_api_key_reads_env_file_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "proxy-key-must-be-ignored")
+    assert tp.load_api_key(tmp_path / "missing.env") is None
+    env = tmp_path / ".env"
+    env.write_text("OTHER=x\nANTHROPIC_API_KEY='sk-real'\n")
+    assert tp.load_api_key(env) == "sk-real"
+
+
 def test_manifest_mismatch_aborts(tmp_path):
     manifest = tp.manifest_for("m1", 500, 100, 1)
     tp.check_manifest(tmp_path / "j", manifest, force_restart=False)

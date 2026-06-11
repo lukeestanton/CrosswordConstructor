@@ -21,11 +21,12 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from itertools import count
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -250,6 +251,136 @@ class ClaudeCliTagSource:
 
     def tag_chunk(self, words: list[str]) -> dict[str, WordTagRecord]:
         return parse_and_validate(words, self._call(build_prompt(words)))
+
+
+# --- anthropic Batches API source ------------------------------------------
+#
+# Same chunks, same prompt, same journal files as the CLI source — only the
+# transport differs: one Message Batch carries every pending chunk at 50% of
+# standard token prices with none of the CLI's per-call session overhead.
+
+
+def load_api_key(env_path: Path) -> str | None:
+    """Read ANTHROPIC_API_KEY from a .env file directly — deliberately NOT
+    from the process environment, which inside a Claude Code session carries
+    a subscription-proxy credential that must never be used for API billing."""
+    if not env_path.exists():
+        return None
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.startswith("ANTHROPIC_API_KEY="):
+            value = line.split("=", 1)[1].strip().strip("'\"")
+            return value or None
+    return None
+
+
+def api_batch_client(api_key: str) -> Any:
+    import anthropic
+
+    # Explicit base_url: the session environment exports ANTHROPIC_BASE_URL
+    # pointing at a proxy; this job must talk to the real API.
+    return anthropic.Anthropic(api_key=api_key, base_url="https://api.anthropic.com")
+
+
+def submit_batch(client: Any, chunks: dict[int, list[str]], model: str) -> str:
+    requests = [
+        {
+            "custom_id": f"chunk-{index}",
+            "params": {
+                "model": model,
+                "max_tokens": 8000,
+                "messages": [{"role": "user", "content": build_prompt(words)}],
+            },
+        }
+        for index, words in sorted(chunks.items())
+    ]
+    return client.messages.batches.create(requests=requests).id
+
+
+def collect_batch_results(
+    client: Any,
+    batch_id: str,
+    chunks: dict[int, list[str]],
+    journal_dir: Path,
+    log: Callable[[str], None],
+) -> tuple[int, dict[int, list[str]]]:
+    """Validate and journal each succeeded result; anything errored, expired,
+    or invalid is returned for the next round."""
+    done = 0
+    failed: dict[int, list[str]] = {}
+    for result in client.messages.batches.results(batch_id):
+        index = int(result.custom_id.rsplit("-", 1)[1])
+        words = chunks[index]
+        if result.result.type == "succeeded":
+            message = result.result.message
+            text_out = next(
+                (b.text for b in message.content if b.type == "text"), ""
+            )
+            try:
+                records = parse_and_validate(words, text_out)
+            except ChunkError as exc:
+                log(f"chunk {index}: invalid output ({exc})")
+                failed[index] = words
+                continue
+            write_chunk(journal_dir, index, records)
+            done += 1
+        else:
+            log(f"chunk {index}: {result.result.type}")
+            failed[index] = words
+    return done, failed
+
+
+def run_api_batch_job(
+    client: Any,
+    chunks: dict[int, list[str]],
+    journal_dir: Path,
+    model: str,
+    rounds: int = 3,
+    poll_seconds: int = 30,
+    log: Callable[[str], None] = print,
+) -> int:
+    """Submit pending chunks as Message Batches until journaled or exhausted.
+
+    Resumable exactly like run_job: chunk-file existence is the ledger, so a
+    killed poll loop just re-runs (an orphaned in-flight batch costs at most
+    one duplicate round, and the upsert ingest makes overlaps harmless)."""
+    pending = {
+        index: words
+        for index, words in chunks.items()
+        if not chunk_path(journal_dir, index).exists()
+    }
+    total_done = len(chunks) - len(pending)
+
+    for round_num in range(1, rounds + 1):
+        if not pending:
+            break
+        log(f"round {round_num}: submitting {len(pending)} chunks as one batch")
+        batch_id = submit_batch(client, pending, model)
+        log(f"batch {batch_id} submitted; polling every {poll_seconds}s")
+        while True:
+            batch = client.messages.batches.retrieve(batch_id)
+            if batch.processing_status == "ended":
+                break
+            counts = batch.request_counts
+            log(
+                f"  {batch.processing_status}: {counts.processing} processing, "
+                f"{counts.succeeded} ok, {counts.errored} errored"
+            )
+            time.sleep(poll_seconds)
+        done, pending = collect_batch_results(
+            client, batch_id, pending, journal_dir, log
+        )
+        total_done += done
+        log(f"round {round_num}: {done} journaled, {len(pending)} to retry")
+
+    if pending:
+        failed_path = journal_dir / "failed_words.tsv"
+        with failed_path.open("a", encoding="utf-8") as fh:
+            for index in sorted(pending):
+                for word in pending[index]:
+                    fh.write(f"{word}\tapi-batch retries exhausted\n")
+        log(f"quarantined {sum(len(w) for w in pending.values())} words")
+    return total_done
 
 
 # --- chunking + journal -------------------------------------------------------
