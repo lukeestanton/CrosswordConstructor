@@ -139,4 +139,11 @@ describe("buildGridState", () => {
     expect(state.cursor).toEqual({ r: 0, c: 0, orient: "across" });
     expect(state.cells.filter((c) => c.kind === "block")).toHaveLength(2);
   });
+
+  it("inherits the word-type filter mask into settings", () => {
+    expect(buildGridState(PATTERN, []).settings.excludedTags).toBe(0);
+    expect(
+      buildGridState(PATTERN, [], { excludedTags: 5 }).settings.excludedTags,
+    ).toBe(5);
+  });
 });

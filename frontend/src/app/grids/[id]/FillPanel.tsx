@@ -26,6 +26,7 @@ import {
   templateWithWord,
 } from "@/lib/fill/template";
 import { getVerdict, setVerdict, verdictKey } from "@/lib/fill/verify";
+import { fetchWordtagsText } from "@/lib/fill/wordtags";
 import type { EditorAction } from "@/lib/grid/history";
 import { activeSlot } from "@/lib/grid/slots";
 import type { GridState } from "@/lib/grid/types";
@@ -65,21 +66,6 @@ const GRID_VERIFY_TIMEOUT_MS = 1000;
 
 /** Session-lived corpus freshness cache: answer → {count, lastSeen}. */
 const freshnessCache = new Map<string, { count: number; lastSeen: string | null }>();
-
-/** One wordtags fetch per session (the freshnessCache idiom); empty string
- * when the endpoint has no data yet — chips stay inert, nothing breaks. */
-let wordtagsPromise: Promise<string> | null = null;
-function fetchWordtags(): Promise<string> {
-  if (!wordtagsPromise) {
-    wordtagsPromise = fetch("/api/wordtags")
-      .then((r) => (r.ok ? r.text() : ""))
-      .catch(() => {
-        wordtagsPromise = null;
-        return "";
-      });
-  }
-  return wordtagsPromise;
-}
 
 export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   const clientRef = useRef<FillClient | null>(null);
@@ -151,7 +137,7 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
         setEngineStale(!client.filtersSupported);
         // Tags land before "ready" so the first candidates pass already
         // reflects a persisted filter; an empty/missing tag file is fine.
-        const tags = await fetchWordtags();
+        const tags = await fetchWordtagsText();
         if (alive && tags) await client.setTags(tags).catch(() => undefined);
         if (alive) setStatus("ready");
       })

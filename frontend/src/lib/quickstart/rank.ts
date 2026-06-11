@@ -74,10 +74,15 @@ export async function rankLayouts(opts: {
   client: FillClient;
   layouts: LayoutRow[];
   words: string[];
+  /** Verdict-cache fingerprint of the worker's ACTUAL filter state (same
+   * "${mask}|" format as FillPanel's, so verdicts are legitimately shared
+   * with the editor). Must describe what the worker really applies — a
+   * stale-wasm session passes "0|" even if the user requested filters. */
+  filterSig: string;
   isStale: () => boolean;
   onUpdate: (rows: RankedLayout[]) => void;
 }): Promise<void> {
-  const { client, layouts, words, isStale, onUpdate } = opts;
+  const { client, layouts, words, filterSig, isStale, onUpdate } = opts;
   const cap = words.length > 0 ? ANALYZE_LAYOUTS_WITH_WORDS : ANALYZE_LAYOUTS_BROWSE;
   const rows: RankedLayout[] = layouts.slice(0, cap).map((layout) => ({
     layout,
@@ -136,8 +141,7 @@ export async function rankLayouts(opts: {
   let proven = 0;
   for (const row of candidates) {
     if (isStale() || proven >= VERIFY_STOP_AFTER) break;
-    // Layout ranking runs filter-free: empty filter signature.
-    const key = verdictKey(CUTOFF, "", row.template);
+    const key = verdictKey(CUTOFF, filterSig, row.template);
     let verdict: FillVerdict | undefined = getVerdict(key);
     if (verdict === undefined || verdict === "unknown") {
       verdict = await client.checkFillable(row.template, CUTOFF, VERIFY_TIMEOUT_MS);

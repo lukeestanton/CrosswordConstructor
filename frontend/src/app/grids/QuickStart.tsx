@@ -14,6 +14,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LayoutPreview } from "@/components/LayoutPreview";
 import { FillClient } from "@/lib/fill/client";
+import { CORE_TAGS } from "@/lib/fill/tags";
+import { fetchWordtagsText } from "@/lib/fill/wordtags";
 import { buildGridState, createGrid } from "@/lib/quickstart/create";
 import {
   compareRanked,
@@ -45,6 +47,11 @@ export function QuickStart() {
   const [maxWords, setMaxWords] = useState<number | null>(null);
   const [sort, setSort] = useState("popular");
   const [engine, setEngine] = useState<EngineStatus>("idle");
+  const [excludedTags, setExcludedTags] = useState(0);
+  /** True when the wasm build predates the filter ops (init handshake). */
+  const [filtersStale, setFiltersStale] = useState(false);
+  /** True when /api/wordtags had no data — filters would be silent no-ops. */
+  const [tagsMissing, setTagsMissing] = useState(false);
   const [rows, setRows] = useState<RankedLayout[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -66,7 +73,17 @@ export function QuickStart() {
     let alive = true;
     client
       .init()
-      .then(() => alive && setEngine("ready"))
+      .then(async () => {
+        if (!alive) return;
+        setFiltersStale(!client.filtersSupported);
+        // Tags land before "ready" so the first scan already honors a
+        // requested filter (FillPanel's boot idiom).
+        const tags = await fetchWordtagsText();
+        if (alive && tags) await client.setTags(tags).catch(() => undefined);
+        if (!alive) return;
+        setTagsMissing(!tags);
+        setEngine("ready");
+      })
       .catch(() => alive && setEngine("error"));
     return () => {
       alive = false;
@@ -131,6 +148,14 @@ export function QuickStart() {
       setRows([]);
       setScanning(true);
       try {
+        // Global filter is worker-resident state: apply it before any
+        // analyze/proof work. On a stale wasm build the worker stays
+        // unfiltered, and the verdict-cache signature must say so.
+        const effectiveMask = clientRef.current!.filtersSupported
+          ? excludedTags
+          : 0;
+        await clientRef.current!.setGlobalFilter(effectiveMask);
+        if (isStale()) return;
         const params = new URLSearchParams({
           width: String(size),
           height: String(size),
@@ -150,6 +175,7 @@ export function QuickStart() {
           client: clientRef.current!,
           layouts: body.results,
           words,
+          filterSig: `${effectiveMask}|`,
           isStale,
           onUpdate: (next) => {
             pendingRows.current = next.slice().sort(compareRanked);
@@ -175,14 +201,18 @@ export function QuickStart() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, engine, size, wordsKey, maxWords, sort]);
+  }, [open, engine, size, wordsKey, maxWords, sort, excludedTags]);
 
   // --- create ---------------------------------------------------------------
   const pick = useCallback(
     async (row: RankedLayout) => {
       if (creating) return;
       setCreating(true);
-      const state = buildGridState(row.layout.pattern, row.assignment);
+      // The REQUESTED mask, not the effective one: on a stale wasm build the
+      // intent still persists, and the editor shows its own stale warning.
+      const state = buildGridState(row.layout.pattern, row.assignment, {
+        excludedTags,
+      });
       const id = await createGrid(state);
       if (id !== null) {
         router.push(`/grids/${id}`);
@@ -190,7 +220,7 @@ export function QuickStart() {
         setCreating(false);
       }
     },
-    [creating, router],
+    [creating, router, excludedTags],
   );
 
   const badge = (row: RankedLayout) => {
@@ -269,6 +299,38 @@ export function QuickStart() {
               </span>
             </span>
 
+            <span className={styles.control}>
+              <span className="caps-label" id="qs-exclude-label">
+                Exclude
+              </span>
+              <span
+                className={styles.tagChips}
+                role="group"
+                aria-labelledby="qs-exclude-label"
+              >
+                {CORE_TAGS.map((t) => {
+                  const on = (excludedTags & (1 << t.bit)) !== 0;
+                  return (
+                    <button
+                      key={t.name}
+                      className={
+                        on ? `${styles.tagChip} ${styles.tagChipOn}` : styles.tagChip
+                      }
+                      aria-pressed={on}
+                      title={
+                        on
+                          ? `${t.label}: excluded — click to allow`
+                          : `exclude ${t.label}`
+                      }
+                      onClick={() => setExcludedTags((m) => m ^ (1 << t.bit))}
+                    >
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </span>
+            </span>
+
             {words.length === 0 && (
               <span className={styles.control}>
                 <label className="caps-label" htmlFor="qs-maxwords">
@@ -306,6 +368,17 @@ export function QuickStart() {
             )}
           </div>
           {wordNote && <p className={styles.note}>{wordNote}</p>}
+          {excludedTags !== 0 && filtersStale && (
+            <p className={styles.note}>
+              fill engine build is stale — word-type filters are inactive; run
+              npm run build:wasm
+            </p>
+          )}
+          {excludedTags !== 0 && !filtersStale && tagsMissing && (
+            <p className={styles.note}>
+              word-type data unavailable — filters have no effect
+            </p>
+          )}
 
           <div className={styles.statusLine}>
             <span className="caps-label">

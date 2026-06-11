@@ -78,6 +78,38 @@
   color: var(--accent);
 }
 
+/* Word-type exclusion chips — same register as the editor's collapsed
+ * filter row (CSS modules are route-scoped; duplication is the pattern). */
+.tagChips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+
+.tagChip {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.tagChip:hover {
+  color: var(--accent);
+}
+
+.tagChipOn {
+  color: var(--ink);
+  text-decoration: line-through;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px;
+}
+
 .wordInput {
   background: transparent;
   border: none;
