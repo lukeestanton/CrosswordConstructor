@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { makeGridState } from "@/lib/grid/types";
+import { QuickStart } from "./QuickStart";
 import styles from "./grids.module.css";
 
 interface GridSummary {
@@ -84,6 +85,8 @@ export default function GridsPage() {
           </button>
         </div>
       </div>
+
+      <QuickStart />
 
       {grids === null ? (
         <p className={styles.empty}>Loading…</p>

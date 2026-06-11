@@ -253,3 +253,38 @@ vendoring the crate (`rust/vendor/ingrid_core`, see its VENDORED.md) with a
 one-line import swap to the API-compatible `instant` crate, wired via
 `[patch.crates-io]`. `console_error_panic_hook` added to the wrapper so any
 future wasm panic surfaces with a message instead of a bare `unreachable`.
+
+## 2026-06-10 — Quick Start: NYT-mined layouts, fillability-ranked
+
+**Layouts are mined, not generated.** The xd corpus already on disk holds
+28k NYT puzzles with full grid sections; 24,550 pass a conservative rule set
+(rotational symmetry only, every run ≥ 3, connected, ≤ 78/140 words) and
+dedupe to 19,051 unique patterns. Editorially proven layouts beat anything a
+generator would produce, and "how often NYT reused this pattern"
+(`usage_count`) is a free quality prior. Mirror-symmetric and gimmick grids
+are dropped — acceptable v1 loss; a `symmetry` column is the obvious
+extension. Patterns are block positions only (no clues/answers), personal
+tool, never redistributed.
+
+**Slot-length signature is a child table, not JSON.** "Which layouts have
+across slots for lengths [15, 11, 11, 9]" is a multiset query
+(`OR … GROUP BY … HAVING COUNT(*) = n`) over `layout_slot_lengths` —
+indexable, no JSON parsing. Symmetric pairing is *not* stored: in a
+rotationally symmetric grid the 180° rotation pairs equal-length across
+slots automatically, so the client computes twins from the pattern itself.
+
+**Across-only word placement** (NYT theme-entry convention). It also makes
+placements pairwise disjoint, so no crossing-conflict checks exist anywhere.
+
+**Ranking is cheap-then-expensive, all client-side wasm**: popularity
+pre-filter (server, 60 rows) → analyze pass (arc-consistency option counts;
+score = mean log₁₀(options) + 0.25·log₁₀(min); ≤ 6 placements tried per
+layout, contradictions dropped) → proof pass (`check_fillable`, 800ms, top
+24, stop after 12 proven; verdicts share the editor's session cache).
+Proven-unfillable rows are dropped per the "only state proofs" rule;
+timeouts render as "unverified", never as dead. Measured on real data:
+first proven layout ~7s after match, full settle ~9s.
+
+**Quick Start owns its own FillClient**, lazily booted on panel expand and
+disposed on collapse — the editor is never open on /grids, so the only cost
+is one extra dict parse behind a visible loading state.
