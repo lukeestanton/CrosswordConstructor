@@ -42,6 +42,9 @@ export function QuickStart() {
   const [open, setOpen] = useState(false);
   const [size, setSize] = useState<number>(15);
   const [words, setWords] = useState<string[]>([]);
+  /** The starred must-include word, placed per revealerMode. */
+  const [revealer, setRevealer] = useState<string | null>(null);
+  const [revealerMode, setRevealerMode] = useState<"last" | "center">("last");
   const [draft, setDraft] = useState("");
   const [wordNote, setWordNote] = useState<string | null>(null);
   const [maxWords, setMaxWords] = useState<number | null>(null);
@@ -127,16 +130,24 @@ export function QuickStart() {
     [size],
   );
 
-  const pickSize = useCallback((n: number) => {
-    setSize(n);
-    setWords((prev) => {
-      const kept = prev.filter((w) => w.length <= n);
-      if (kept.length < prev.length) {
-        setWordNote(`dropped ${prev.length - kept.length} word(s) longer than ${n}`);
-      }
-      return kept;
-    });
+  /** Removing a word always un-stars it — every removal path goes here. */
+  const removeWord = useCallback((word: string) => {
+    setWords((prev) => prev.filter((w) => w !== word));
+    setRevealer((r) => (r === word ? null : r));
   }, []);
+
+  const pickSize = useCallback(
+    (n: number) => {
+      setSize(n);
+      const kept = words.filter((w) => w.length <= n);
+      if (kept.length < words.length) {
+        setWordNote(`dropped ${words.length - kept.length} word(s) longer than ${n}`);
+        setWords(kept);
+        if (revealer !== null && !kept.includes(revealer)) setRevealer(null);
+      }
+    },
+    [words, revealer],
+  );
 
   // --- fetch + rank ---------------------------------------------------------
   const wordsKey = words.join(",");
@@ -176,6 +187,7 @@ export function QuickStart() {
           layouts: body.results,
           words,
           filterSig: `${effectiveMask}|`,
+          revealer: revealer !== null ? { word: revealer, mode: revealerMode } : undefined,
           isStale,
           onUpdate: (next) => {
             pendingRows.current = next.slice().sort(compareRanked);
@@ -201,16 +213,25 @@ export function QuickStart() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, engine, size, wordsKey, maxWords, sort, excludedTags]);
+  }, [open, engine, size, wordsKey, maxWords, sort, excludedTags, revealer, revealerMode]);
 
   // --- create ---------------------------------------------------------------
   const pick = useCallback(
     async (row: RankedLayout) => {
       if (creating) return;
       setCreating(true);
+      // Cursor lands on the revealer when one is set (buildGridState starts
+      // at the first placement); cell writes are order-independent.
+      const assignment =
+        revealer === null
+          ? row.assignment
+          : [
+              ...row.assignment.filter((p) => p.word === revealer),
+              ...row.assignment.filter((p) => p.word !== revealer),
+            ];
       // The REQUESTED mask, not the effective one: on a stale wasm build the
       // intent still persists, and the editor shows its own stale warning.
-      const state = buildGridState(row.layout.pattern, row.assignment, {
+      const state = buildGridState(row.layout.pattern, assignment, {
         excludedTags,
       });
       const id = await createGrid(state);
@@ -220,7 +241,7 @@ export function QuickStart() {
         setCreating(false);
       }
     },
-    [creating, router, excludedTags],
+    [creating, router, excludedTags, revealer],
   );
 
   const badge = (row: RankedLayout) => {
@@ -270,15 +291,35 @@ export function QuickStart() {
               </label>
               <span className={styles.chips}>
                 {words.map((word) => (
-                  <button
-                    key={word}
-                    className={`${styles.chip} data`}
-                    onClick={() => setWords((prev) => prev.filter((w) => w !== word))}
-                    aria-label={`Remove ${word}`}
-                    title="Remove"
-                  >
-                    {word} ×
-                  </button>
+                  <span key={word} className={styles.chipWrap}>
+                    <button
+                      className={
+                        revealer === word
+                          ? `${styles.star} ${styles.starOn}`
+                          : styles.star
+                      }
+                      aria-pressed={revealer === word}
+                      aria-label={`Mark ${word} as revealer`}
+                      title={
+                        revealer === word
+                          ? "revealer — click to unmark"
+                          : "mark as revealer"
+                      }
+                      onClick={() =>
+                        setRevealer((r) => (r === word ? null : word))
+                      }
+                    >
+                      {revealer === word ? "★" : "☆"}
+                    </button>
+                    <button
+                      className={`${styles.chip} data`}
+                      onClick={() => removeWord(word)}
+                      aria-label={`Remove ${word}`}
+                      title="Remove"
+                    >
+                      {word} ×
+                    </button>
+                  </span>
                 ))}
                 <input
                   id="qs-words"
@@ -291,13 +332,39 @@ export function QuickStart() {
                       e.preventDefault();
                       commitDraft(draft);
                     } else if (e.key === "Backspace" && draft === "") {
-                      setWords((prev) => prev.slice(0, -1));
+                      const last = words[words.length - 1];
+                      if (last !== undefined) removeWord(last);
                     }
                   }}
                   onBlur={() => commitDraft(draft)}
                 />
               </span>
             </span>
+
+            {revealer !== null && (
+              <span className={styles.control}>
+                <span className="caps-label">Revealer</span>
+                <span
+                  role="radiogroup"
+                  aria-label="Revealer placement"
+                  className={styles.sizes}
+                >
+                  {(["last", "center"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      role="radio"
+                      aria-checked={revealerMode === mode}
+                      className={`${styles.sizeOption} data ${
+                        revealerMode === mode ? styles.sizeOn : ""
+                      }`}
+                      onClick={() => setRevealerMode(mode)}
+                    >
+                      {mode === "last" ? "last across" : "center row"}
+                    </button>
+                  ))}
+                </span>
+              </span>
+            )}
 
             <span className={styles.control}>
               <span className="caps-label" id="qs-exclude-label">
@@ -368,6 +435,15 @@ export function QuickStart() {
             )}
           </div>
           {wordNote && <p className={styles.note}>{wordNote}</p>}
+          {revealer !== null &&
+            revealerMode === "center" &&
+            revealer.length % 2 !== size % 2 && (
+              <p className={styles.note}>
+                {revealer} ({revealer.length}) can&apos;t sit centered in a{" "}
+                {size}-wide grid — a centered slot here needs an odd-length
+                word.
+              </p>
+            )}
           {excludedTags !== 0 && filtersStale && (
             <p className={styles.note}>
               fill engine build is stale — word-type filters are inactive; run

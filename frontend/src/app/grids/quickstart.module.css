@@ -78,6 +78,28 @@
   color: var(--accent);
 }
 
+.chipWrap {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+/* Revealer star — quiet outline until starred, accent when on. */
+.star {
+  background: transparent;
+  border: none;
+  padding: var(--sp-1) 2px;
+  cursor: pointer;
+  color: var(--ink-muted);
+}
+
+.star:hover {
+  color: var(--accent);
+}
+
+.starOn {
+  color: var(--accent);
+}
+
 /* Word-type exclusion chips — same register as the editor's collapsed
  * filter row (CSS modules are route-scoped; duplication is the pattern). */
 .tagChips {
