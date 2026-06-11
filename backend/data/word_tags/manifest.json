@@ -1,0 +1,8 @@
+{
+  "taxonomy": "5e05eb0b2786b1c3",
+  "prompt_sha": "aae2ddf0d7a909a6",
+  "model": "claude-haiku-4-5",
+  "chunk_size": 150,
+  "word_count": 314820,
+  "chunk_count": 2099
+}
