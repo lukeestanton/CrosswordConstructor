@@ -184,6 +184,13 @@ class ClaudeCliTagSource:
         self.run_fn = run_fn
 
     def _call(self, prompt: str) -> str:
+        # When this script itself runs inside a Claude Code session, the
+        # harness exports stream-mode vars the nested CLI would trip over.
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if k != "CLAUDE_CODE_INCLUDE_PARTIAL_MESSAGES"
+        }
         try:
             proc = self.run_fn(
                 [
@@ -198,6 +205,7 @@ class ClaudeCliTagSource:
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
+                env=env,
             )
         except subprocess.TimeoutExpired as exc:
             raise ChunkError(f"claude CLI timed out after {self.timeout}s") from exc
