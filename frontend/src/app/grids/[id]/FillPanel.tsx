@@ -14,8 +14,10 @@ import {
   type AnalyzeResult,
   type CandidatesResult,
   type FillVerdict,
+  type SlotFilterSpec,
   type SlotReport,
 } from "@/lib/fill/client";
+import { TAGS, maskLabels, type TagDef } from "@/lib/fill/tags";
 import {
   fillsFromResult,
   gridToTemplate,
@@ -64,6 +66,21 @@ const GRID_VERIFY_TIMEOUT_MS = 1000;
 /** Session-lived corpus freshness cache: answer → {count, lastSeen}. */
 const freshnessCache = new Map<string, { count: number; lastSeen: string | null }>();
 
+/** One wordtags fetch per session (the freshnessCache idiom); empty string
+ * when the endpoint has no data yet — chips stay inert, nothing breaks. */
+let wordtagsPromise: Promise<string> | null = null;
+function fetchWordtags(): Promise<string> {
+  if (!wordtagsPromise) {
+    wordtagsPromise = fetch("/api/wordtags")
+      .then((r) => (r.ok ? r.text() : ""))
+      .catch(() => {
+        wordtagsPromise = null;
+        return "";
+      });
+  }
+  return wordtagsPromise;
+}
+
 export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   const clientRef = useRef<FillClient | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -85,6 +102,31 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   const template = useMemo(() => gridToTemplate(state), [state]);
   const active = activeSlot(state);
   const slotKey = active?.key ?? null;
+  const [moreTags, setMoreTags] = useState(false);
+
+  // --- word-type filters ---------------------------------------------------
+  const excludedTags = state.settings.excludedTags;
+  const activeSlotMask = (slotKey && state.slotFilters[slotKey]) || 0;
+
+  /** Per-slot masks in engine coordinates (key is `${orient}:${r},${c}`). */
+  const slotFilterSpecs = useMemo<SlotFilterSpec[]>(
+    () =>
+      Object.entries(state.slotFilters).map(([key, mask]) => {
+        const [orient, rc] = key.split(":");
+        const [r, c] = rc.split(",").map(Number);
+        return { x: c, y: r, down: orient === "down", mask };
+      }),
+    [state.slotFilters],
+  );
+
+  /** Verdict-cache fingerprint: any filter change invalidates via new keys. */
+  const filterSig = useMemo(() => {
+    const slots = Object.entries(state.slotFilters)
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([k, m]) => `${k}:${m}`)
+      .join(",");
+    return `${excludedTags}|${slots}`;
+  }, [excludedTags, state.slotFilters]);
 
   // Collapse back to one page when the slot changes (render-time adjustment,
   // so the first paint of a new slot never flashes the old page size).
@@ -101,10 +143,14 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     let alive = true;
     client
       .init()
-      .then((n) => {
+      .then(async (n) => {
         if (!alive) return;
         setWordCount(n);
-        setStatus("ready");
+        // Tags land before "ready" so the first candidates pass already
+        // reflects a persisted filter; an empty/missing tag file is fine.
+        const tags = await fetchWordtags();
+        if (alive && tags) await client.setTags(tags).catch(() => undefined);
+        if (alive) setStatus("ready");
       })
       .catch(() => {
         if (alive) setStatus("error");
@@ -114,6 +160,13 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
       client.dispose();
     };
   }, []);
+
+  // --- global filter sync (worker-resident state; FillClient replays it
+  // after cancel()'s respawn, this effect handles user toggles) -------------
+  useEffect(() => {
+    if (status !== "ready") return;
+    clientRef.current?.setGlobalFilter(excludedTags).catch(() => undefined);
+  }, [status, excludedTags]);
 
   // --- live candidates ---------------------------------------------------
   useEffect(() => {
@@ -132,6 +185,7 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
           cutoff,
           engineSlot,
           visible,
+          slotFilterSpecs,
         );
         if (candSeq.current === seq) setCands(result);
       } catch {
@@ -140,7 +194,7 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     }, 120);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, template, slotKey, cutoff, visible]);
+  }, [status, template, slotKey, cutoff, visible, filterSig]);
 
   // --- corpus freshness (after the list renders; the list never waits) -----
   useEffect(() => {
@@ -188,14 +242,14 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     if (!active) return m;
     for (const cand of cands.items) {
       const v = getVerdict(
-        verdictKey(cutoff, templateWithWord(template, active, cand.word)),
+        verdictKey(cutoff, filterSig, templateWithWord(template, active, cand.word)),
       );
       if (v !== undefined) m.set(cand.word, v);
     }
     return m;
     // verifyTick tracks the external cache the values come from.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cands, template, slotKey, cutoff, verifyTick]);
+  }, [cands, template, slotKey, cutoff, filterSig, verifyTick]);
 
   useEffect(() => {
     const seq = ++verifySeq.current;
@@ -204,7 +258,7 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     const queue = cands.items
       .map((cand) => {
         const probe = templateWithWord(template, slot, cand.word);
-        return { probe, key: verdictKey(cutoff, probe) };
+        return { probe, key: verdictKey(cutoff, filterSig, probe) };
       })
       .filter((item) => getVerdict(item.key) === undefined);
     if (queue.length === 0) return;
@@ -216,6 +270,7 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
           item.probe,
           cutoff,
           VERIFY_TIMEOUT_MS,
+          slotFilterSpecs,
         );
         setVerdict(item.key, verdict);
         if (cancelled) return;
@@ -227,7 +282,7 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, cands, template, slotKey, cutoff]);
+  }, [status, cands, template, slotKey, cutoff, filterSig]);
 
   // --- whole-grid proof (background) --------------------------------------
   // "Every candidate for some slot is a dead end" is equivalent to "the grid
@@ -237,11 +292,11 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   // came from the shorter per-candidate budget, so the effect retries it with
   // the grid budget rather than trusting it.
   const gridVerdict =
-    status === "ready" ? getVerdict(verdictKey(cutoff, template)) : undefined;
+    status === "ready" ? getVerdict(verdictKey(cutoff, filterSig, template)) : undefined;
 
   useEffect(() => {
     if (status !== "ready") return;
-    const key = verdictKey(cutoff, template);
+    const key = verdictKey(cutoff, filterSig, template);
     const cached = getVerdict(key);
     if (cached === "fillable" || cached === "unfillable") return;
     let cancelled = false;
@@ -250,6 +305,7 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
         template,
         cutoff,
         GRID_VERIFY_TIMEOUT_MS,
+        slotFilterSpecs,
       );
       setVerdict(key, verdict);
       if (!cancelled) setVerifyTick((t) => t + 1);
@@ -258,7 +314,8 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [status, template, cutoff]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, template, cutoff, filterSig]);
 
   // --- ambient analysis (heat + unfillable) ------------------------------
   useEffect(() => {
@@ -266,14 +323,15 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     const seq = ++analyzeSeq.current;
     const timer = setTimeout(async () => {
       try {
-        const result = await clientRef.current!.analyze(template, cutoff);
+        const result = await clientRef.current!.analyze(template, cutoff, slotFilterSpecs);
         if (analyzeSeq.current === seq) setAnalysis(result);
       } catch {
         /* stale */
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [status, template, cutoff]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, template, cutoff, filterSig]);
 
   // Stable partition: proven-dead candidates sink, score order preserved
   // within each group; rows reorder as verdicts stream in.
@@ -316,6 +374,28 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [analysis, allDead, slotKey]);
 
+  // --- tag chips -----------------------------------------------------------
+  // Collapsed: the six core tags plus any non-core tag currently excluded
+  // (so an active exclusion is always visible and removable); "more"
+  // discloses the full taxonomy for both rows.
+  const chipRow = (mask: number, onToggle: (bit: number) => void, scope: string) =>
+    TAGS.filter(
+      (t: TagDef) => moreTags || t.group === "core" || mask & (1 << t.bit),
+    ).map((t) => {
+      const on = (mask & (1 << t.bit)) !== 0;
+      return (
+        <button
+          key={`${scope}-${t.name}`}
+          className={on ? `${styles.tagChip} ${styles.tagChipOn}` : styles.tagChip}
+          aria-pressed={on}
+          title={on ? `${t.label}: excluded — click to allow` : `exclude ${t.label}`}
+          onClick={() => onToggle(1 << t.bit)}
+        >
+          {t.label}
+        </button>
+      );
+    });
+
   // --- actions -----------------------------------------------------------
   const accept = useCallback(
     (word: string) => {
@@ -335,7 +415,12 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     setFilling(true);
     setFillNote(null);
     try {
-      const result = await clientRef.current.autofill(template, cutoff);
+      const result = await clientRef.current.autofill(
+        template,
+        cutoff,
+        undefined,
+        slotFilterSpecs,
+      );
       if (result.ok && result.grid) {
         const fills = fillsFromResult(state, result.grid);
         if (fills.length > 0) dispatch({ type: "applyFill", cells: fills });
@@ -390,15 +475,55 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
                   </option>
                 ))}
               </select>
+              {excludedTags !== 0 && ` · excl ${maskLabels(excludedTags).join(", ")}`}
             </>
           )}
         </span>
       </div>
 
+      {status === "ready" && (
+        <div className={styles.tagRow} role="group" aria-label="Excluded word types">
+          {chipRow(
+            excludedTags,
+            (bit) =>
+              dispatch({
+                type: "setSettings",
+                settings: { excludedTags: excludedTags ^ bit },
+              }),
+            "global",
+          )}
+          <button
+            className={`${styles.statButton} data`}
+            aria-expanded={moreTags}
+            onClick={() => setMoreTags((m) => !m)}
+          >
+            {moreTags ? "less" : "more"}
+          </button>
+        </div>
+      )}
+      {status === "ready" && active && (moreTags || activeSlotMask !== 0) && (
+        <div className={styles.tagRow} role="group" aria-label="Slot word-type exclusions">
+          <span className={styles.slotTagLabel}>this slot</span>
+          {chipRow(
+            activeSlotMask,
+            (bit) =>
+              dispatch({
+                type: "setSlotFilter",
+                key: active.key,
+                mask: activeSlotMask ^ bit,
+              }),
+            "slot",
+          )}
+        </div>
+      )}
+
       {gridVerdict === "unfillable" && (
         <p className={styles.deadNote}>
-          No complete fill exists for the grid as filled (cutoff {cutoff}+) —
-          every candidate in every slot is a dead end.
+          No complete fill exists for the grid as filled (cutoff {cutoff}+
+          {excludedTags !== 0 || slotFilterSpecs.length > 0
+            ? ", word-type filters active"
+            : ""}
+          ) — every candidate in every slot is a dead end.
         </p>
       )}
       {gridVerdict !== "unfillable" && allDead && (

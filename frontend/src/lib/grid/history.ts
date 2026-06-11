@@ -31,7 +31,10 @@ function isMutation(prev: GridState, next: GridState): boolean {
     prev.symmetry !== next.symmetry ||
     prev.title !== next.title ||
     prev.width !== next.width ||
-    prev.height !== next.height
+    prev.height !== next.height ||
+    // Per-slot filters shape fill outcomes, so they ride the undo stack;
+    // the global filter is a setting and deliberately does not.
+    prev.slotFilters !== next.slotFilters
   );
 }
 

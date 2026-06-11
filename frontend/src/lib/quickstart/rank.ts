@@ -136,7 +136,8 @@ export async function rankLayouts(opts: {
   let proven = 0;
   for (const row of candidates) {
     if (isStale() || proven >= VERIFY_STOP_AFTER) break;
-    const key = verdictKey(CUTOFF, row.template);
+    // Layout ranking runs filter-free: empty filter signature.
+    const key = verdictKey(CUTOFF, "", row.template);
     let verdict: FillVerdict | undefined = getVerdict(key);
     if (verdict === undefined || verdict === "unknown") {
       verdict = await client.checkFillable(row.template, CUTOFF, VERIFY_TIMEOUT_MS);

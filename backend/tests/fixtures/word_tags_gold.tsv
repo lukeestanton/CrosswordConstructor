@@ -1,0 +1,104 @@
+# Gold set for the wordlist tagging job: WORD<TAB>CODES<TAB>FAM<TAB>LANG<TAB>rationale.
+# Codes per app/services/word_tags.py. '-' = deliberately untagged. The
+# dual-identity traps (AMBER, BILL, ...) encode the PROPER-means-proper-ONLY
+# rule; --sample measures the model against every row and prints disagreements.
+OPRAH	PN	4		talk-show host; no common reading
+OBAMA	PN	4		president
+ARETHA	PN	3		Franklin
+OSLO	PL	3		Norwegian capital
+IDAHO	PL	4		state
+TULSA	PL	3		Oklahoma city
+OREO	PB	4		cookie brand
+ALPO	PB	2		dog-food brand
+IKEA	PB	4		furniture brand
+AMANA	PB	2		appliance brand
+ELSA	PM	4		Frozen character
+NEMO	PM	3		Pixar fish / Verne captain
+AIDA	PM	3		Verdi opera
+SHREK	PM	4		film ogre
+ASTA	PMW	1		Thin Man dog; classic crosswordese
+AVON	PLB	3		English river AND cosmetics brand
+AMBER	-	4		also a color: common reading, so no P
+BILL	-	4		invoice/beak
+MERCURY	-	4		the element is a common noun
+IRIS	-	3		flower / part of the eye
+JACK	-	4		car jack
+PAT	-	4		pat on the back
+SUE	-	4		the verb
+CAROL	-	4		Christmas song
+VIOLA	-	3		the instrument
+OPAL	-	3		gem
+CHINA	-	4		dishes
+DAISY	-	4		flower
+ATTY	A	2		attorney
+ESTD	A	1		established
+SSN	A	3		Social Security number
+RPM	A	3		revolutions per minute
+ASAP	A	4		as soon as possible
+IRS	PA	4		agency initialism; no common reading
+NCO	A	2		noncommissioned officer
+ETA	-	3		also a Greek letter: full reading exists, no A
+ATAD	T	2		"a tad" fragment
+ORSO	T	2		"___ or so"
+ASEC	T	2		"wait ___"
+INA	T	3		"one ___ million"; partial identity dominates
+PARTYANIMAL	H	3		multiword written solid
+INAROW	H	3		"in a row"
+OPENBAR	H	3		"open bar"
+ETPHONEHOME	H	3		movie line, phrase not title
+ETRE	F	2	fr	French "to be"
+ERAT	F	2	la	QED's E
+ETE	F	2	fr	French summer
+ESSA	F	1	it	Italian pronoun
+SRTA	AF	2	es	abbreviated señorita
+AMIGO	-	4		fully assimilated borrowing, not FOREIGN
+OREOS	PSB	4		plural of a brand
+ERAS	S	4		plural
+RAN	S	4		past tense; Kurosawa reading secondary
+EELS	S	3		plural
+SMOTE	SD	2		archaic past tense
+ASSES	S	3		plural; donkey reading keeps it out of U
+MMXI	R	2		2011
+CDII	R	1		402
+MCM	R	2		1900
+NEURO	X	3		prefix
+OLOGY	X	2		suffix
+ENNE	X	1		feminizing suffix
+ITIS	X	2		inflammation suffix
+AMEBA	V	2		variant of amoeba
+ESTHETE	V	2		variant of aesthete
+TSAR	-	3		standard spelling, not the variant
+PSST	J	3		attention-getter
+BRR	J	3		cold
+TSK	J	3		disapproval
+AHEM	J	3		throat-clear
+OHO	J	2		surprise
+AEIOU	Z	2		vowel run
+ESS	Z	2		spelled letter
+ESSES	SZ	2		plural spelled letters
+ATONER	C	1		roll-your-own -ER noun
+ELOPER	C	1		roll-your-own -ER noun
+REHEM	C	1		RE- verb nobody says
+TOTERS	SC	1		contrived plural agent noun
+ETUI	W	1		needle case, grids only
+ADIT	W	1		mine entrance, grids only
+ANOA	W	0		dwarf buffalo, grids only
+OLIO	W	2		miscellany, grids mostly
+OLEO	WD	2		dated margarine word, grid staple
+ESNE	WD	0		archaic slave, grids only
+ALOE	-	3		real everyday word, not crosswordese
+ERST	WD	1		archaic "formerly"
+HEPCAT	DG	2		dated slang
+DADDYO	DG	2		dated slang
+BAE	G	3		significant other
+FOMO	AG	3		acronym slang
+YEET	G	3		to hurl
+AINT	G	4		nonstandard contraction
+PORNO	U	3		adult content
+SMUT	U	2		obscene material
+SEXT	GU	3		adult + informal
+SARIN	K	2		nerve agent
+TUMOR	K	3		disease
+NOOSE	K	3		execution
+ARSON	K	3		crime
+ENEMA	K	2		breakfast-test fail

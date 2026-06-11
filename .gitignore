@@ -32,3 +32,8 @@ frontend/next-env.d.ts
 rust/**/target/
 rust/fill-wasm/pkg/
 frontend/public/fill/fill_wasm*
+
+# Word-tag journal: paid-for LLM output, small, must survive the container.
+!backend/data/word_tags/
+!backend/data/word_tags/*.tsv
+!backend/data/word_tags/manifest.json

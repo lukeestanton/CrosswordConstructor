@@ -26,8 +26,14 @@ self.onmessage = async (event) => {
       case "init":
         result = wasm_bindgen.init_wordlist(args.dict);
         break;
+      case "setTags":
+        result = wasm_bindgen.set_word_tags(args.tags);
+        break;
+      case "setGlobalFilter":
+        result = wasm_bindgen.set_global_filter(args.mask);
+        break;
       case "analyze":
-        result = wasm_bindgen.analyze(args.template, args.minScore);
+        result = wasm_bindgen.analyze(args.template, args.minScore, args.slotFiltersJson ?? "");
         break;
       case "candidates":
         result = wasm_bindgen.candidates(
@@ -37,13 +43,24 @@ self.onmessage = async (event) => {
           args.y,
           args.down,
           args.limit,
+          args.slotFiltersJson ?? "",
         );
         break;
       case "autofill":
-        result = wasm_bindgen.autofill(args.template, args.minScore, args.timeoutMs);
+        result = wasm_bindgen.autofill(
+          args.template,
+          args.minScore,
+          args.timeoutMs,
+          args.slotFiltersJson ?? "",
+        );
         break;
       case "checkFillable":
-        result = wasm_bindgen.check_fillable(args.template, args.minScore, args.timeoutMs);
+        result = wasm_bindgen.check_fillable(
+          args.template,
+          args.minScore,
+          args.timeoutMs,
+          args.slotFiltersJson ?? "",
+        );
         break;
       default:
         throw new Error(`unknown op ${op}`);

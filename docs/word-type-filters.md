@@ -1,8 +1,14 @@
-# Word-type filters — design (not yet implemented)
+# Word-type filters — design
 
-Status: **designed 2026-06-10, implementation deferred.** Everything below was
-verified against the codebase at design time (file pointers included); the one
-open decision is the tag *source* (§3). Pick that and the rest is build-order.
+Status: **implemented 2026-06-11.** Built as designed, with two deltas:
+(1) the tag *source* (§3) is the local `claude` CLI on the personal-account
+connection — `backend/scripts/tag_wordlist.py`, resumable journal under
+`backend/data/word_tags/` — not the Message Batches API; (2) the taxonomy
+grew from six to 21 bits (proper subtypes NAME/PLACE/BRAND/MEDIA; form tags
+ROMAN/AFFIX/VARIANT/INTERJ/LETTERS; quality tags CONTRIVED/CROSSWORDESE/
+DATED/SLANG; content tags ADULT/GRIM) plus familiarity/lang sidecar columns
+— canonical table in `backend/app/services/word_tags.py`, drift-guarded by
+`backend/tests/test_word_tag_constants.py`.
 
 ## 1. Goal & semantics
 

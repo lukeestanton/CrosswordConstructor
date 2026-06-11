@@ -63,7 +63,7 @@ test("candidates list reports the true total and expands on demand", async ({
   const rows = page.locator("ul[class*=candList] li");
   await expect(rows).toHaveCount(40, { timeout: 20_000 });
   await expect(page.getByText(/40 of 64/i)).toBeVisible();
-  await page.getByRole("button", { name: /more/ }).click();
+  await page.getByRole("button", { name: /\+ \d+ more/ }).click();
   await expect(rows).toHaveCount(64);
 });
 

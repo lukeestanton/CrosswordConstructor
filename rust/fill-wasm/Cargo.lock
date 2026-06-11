@@ -163,6 +163,7 @@ dependencies = [
  "ingrid_core",
  "serde",
  "serde-wasm-bindgen",
+ "serde_json",
  "wasm-bindgen",
 ]
 
