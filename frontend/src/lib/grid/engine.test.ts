@@ -574,6 +574,22 @@ describe("undo/redo", () => {
     expect(ed.present.slotFilters["across:0,0"]).toBe(9);
   });
 
+  it("setSlotExemption is undoable; mask 0 drops the key", () => {
+    let ed = makeEditor(withCursor(grid(["...", "...", "..."]), 0, 0));
+    ed = runEditor(ed, { type: "setSlotExemption", key: "across:0,0", mask: 1 });
+    expect(ed.present.slotExemptions["across:0,0"]).toBe(1);
+    expect(ed.past).toHaveLength(1);
+
+    // No-op repeat: no history entry.
+    ed = runEditor(ed, { type: "setSlotExemption", key: "across:0,0", mask: 1 });
+    expect(ed.past).toHaveLength(1);
+
+    ed = runEditor(ed, { type: "setSlotExemption", key: "across:0,0", mask: 0 });
+    expect("across:0,0" in ed.present.slotExemptions).toBe(false);
+    ed = runEditor(ed, { type: "undo" });
+    expect(ed.present.slotExemptions["across:0,0"]).toBe(1);
+  });
+
   it("global excludedTags is a setting, not an undo step", () => {
     let ed = makeEditor(withCursor(grid(["..."]), 0, 0));
     ed = runEditor(ed, { type: "setSettings", settings: { excludedTags: 3 } });
@@ -586,10 +602,12 @@ describe("undo/redo", () => {
     const legacy = JSON.parse(JSON.stringify(original)) as GridState;
     // Simulate a payload saved before word-type filters existed.
     delete (legacy as Partial<GridState>).slotFilters;
+    delete (legacy as Partial<GridState>).slotExemptions;
     delete (legacy.settings as Partial<GridState["settings"]>).excludedTags;
     let ed = makeEditor(original);
     ed = runEditor(ed, { type: "restore", payload: legacy });
     expect(ed.present.slotFilters).toEqual({});
+    expect(ed.present.slotExemptions).toEqual({});
     expect(ed.present.settings.excludedTags).toBe(0);
   });
 

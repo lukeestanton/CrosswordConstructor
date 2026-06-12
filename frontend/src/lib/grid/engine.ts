@@ -58,6 +58,7 @@ export type Action =
   | { type: "selectSlot"; key: string }
   | { type: "setSettings"; settings: Partial<Settings> }
   | { type: "setSlotFilter"; key: string; mask: number }
+  | { type: "setSlotExemption"; key: string; mask: number }
   | { type: "setTitle"; title: string }
   | {
       type: "applyFill";
@@ -647,6 +648,13 @@ export function reduce(state: GridState, action: Action): GridState {
       if (action.mask === 0) delete slotFilters[action.key];
       else slotFilters[action.key] = action.mask;
       return { ...state, slotFilters };
+    }
+    case "setSlotExemption": {
+      if ((state.slotExemptions[action.key] ?? 0) === action.mask) return state;
+      const slotExemptions = { ...state.slotExemptions };
+      if (action.mask === 0) delete slotExemptions[action.key];
+      else slotExemptions[action.key] = action.mask;
+      return { ...state, slotExemptions };
     }
     case "setTitle":
       return { ...state, title: action.title };

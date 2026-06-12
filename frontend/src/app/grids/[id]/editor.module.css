@@ -438,6 +438,20 @@
   color: var(--accent);
 }
 
+.ledgerCellExempt {
+  /* Permissive exception: full ink, not accent — accent means "excluded"
+   * everywhere else in the filter language. */
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.tagChipExempt {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--ink-muted);
+  text-underline-offset: 2px;
+}
+
 .ledgerGroup {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);

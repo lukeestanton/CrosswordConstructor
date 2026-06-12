@@ -80,6 +80,11 @@ export interface GridState {
   /** Per-slot extra tag exclusions layered on settings.excludedTags, keyed
    * like `clues` by slot identity; absent key = no extra exclusions. */
   slotFilters: Record<string, number>;
+  /** Per-slot exemptions from settings.excludedTags: bits set here are
+   * IGNORED by the global filter for that slot (e.g. one themer slot may see
+   * proper nouns in a no-propers grid). Effective per-slot exclusion is
+   * (excludedTags & ~exemption) | slotFilter. Keyed by slot identity. */
+  slotExemptions: Record<string, number>;
 }
 
 export interface Slot {
@@ -121,6 +126,7 @@ export function makeGridState(width = 15, height = 15): GridState {
     nudge: 0,
     notice: null,
     slotFilters: {},
+    slotExemptions: {},
   };
 }
 
@@ -131,5 +137,6 @@ export function normalizeGridState(state: GridState): GridState {
     ...state,
     settings: { ...makeGridState().settings, ...state.settings },
     slotFilters: state.slotFilters ?? {},
+    slotExemptions: state.slotExemptions ?? {},
   };
 }

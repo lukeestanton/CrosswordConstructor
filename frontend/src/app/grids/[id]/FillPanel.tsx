@@ -116,17 +116,46 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   // --- word-type filters ---------------------------------------------------
   const excludedTags = state.settings.excludedTags;
   const activeSlotMask = (slotKey && state.slotFilters[slotKey]) || 0;
+  /** Bits of the global mask the active slot is exempt from. */
+  const activeSlotExempt = (slotKey && state.slotExemptions[slotKey]) || 0;
+  const anyExemption = useMemo(
+    () => Object.values(state.slotExemptions).some((m) => m !== 0),
+    [state.slotExemptions],
+  );
 
-  /** Per-slot masks in engine coordinates (key is `${orient}:${r},${c}`). */
-  const slotFilterSpecs = useMemo<SlotFilterSpec[]>(
-    () =>
-      Object.entries(state.slotFilters).map(([key, mask]) => {
+  /** Per-slot masks in engine coordinates (key is `${orient}:${r},${c}`).
+   *
+   * Two regimes. Without exemptions, the global mask lives wasm-side
+   * (set_global_filter) and only extra per-slot exclusions travel here —
+   * today's fast path, bit-identical behavior. With any exemption, the global
+   * filter can't be word-level state (hidden words would be gone for the
+   * exempt slot too), so it is expressed per-slot instead: every slot gets
+   * (global & ~exemption) | extra, and set_global_filter drops to 0. */
+  const slotFilterSpecs = useMemo<SlotFilterSpec[]>(() => {
+    if (!anyExemption) {
+      return Object.entries(state.slotFilters).map(([key, mask]) => {
         const [orient, rc] = key.split(":");
         const [r, c] = rc.split(",").map(Number);
         return { x: c, y: r, down: orient === "down", mask };
-      }),
-    [state.slotFilters],
-  );
+      });
+    }
+    const specs: SlotFilterSpec[] = [];
+    for (const slot of slotsOf(state).slots) {
+      const mask =
+        (excludedTags & ~(state.slotExemptions[slot.key] ?? 0)) |
+        (state.slotFilters[slot.key] ?? 0);
+      if (mask !== 0) {
+        specs.push({
+          x: slot.cells[0].c,
+          y: slot.cells[0].r,
+          down: slot.orient === "down",
+          mask,
+        });
+      }
+    }
+    return specs;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.cells, state.slotFilters, state.slotExemptions, excludedTags, anyExemption]);
 
   /** Verdict-cache fingerprint: any filter change invalidates via new keys. */
   const filterSig = useMemo(() => {
@@ -134,8 +163,12 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
       .sort(([a], [b]) => (a < b ? -1 : 1))
       .map(([k, m]) => `${k}:${m}`)
       .join(",");
-    return `${excludedTags}|${slots}`;
-  }, [excludedTags, state.slotFilters]);
+    const exemptions = Object.entries(state.slotExemptions)
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([k, m]) => `${k}:${m}`)
+      .join(",");
+    return `${excludedTags}|${slots}|x${exemptions}`;
+  }, [excludedTags, state.slotFilters, state.slotExemptions]);
 
   // Collapse back to one page when the slot changes (render-time adjustment,
   // so the first paint of a new slot never flashes the old page size).
@@ -173,11 +206,16 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   }, []);
 
   // --- global filter sync (worker-resident state; FillClient replays it
-  // after cancel()'s respawn, this effect handles user toggles) -------------
+  // after cancel()'s respawn, this effect handles user toggles). While any
+  // exemption exists the global mask rides slotFilterSpecs instead — the
+  // wasm-side mask must be 0 or hidden words could never reach the exempt
+  // slot. ---------------------------------------------------------------
   useEffect(() => {
     if (status !== "ready") return;
-    clientRef.current?.setGlobalFilter(excludedTags).catch(() => undefined);
-  }, [status, excludedTags]);
+    clientRef.current
+      ?.setGlobalFilter(anyExemption ? 0 : excludedTags)
+      .catch(() => undefined);
+  }, [status, excludedTags, anyExemption]);
 
   // --- live candidates ---------------------------------------------------
   useEffect(() => {
@@ -469,6 +507,14 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     if (!active) return;
     dispatch({ type: "setSlotFilter", key: active.key, mask: activeSlotMask ^ bit });
   };
+  const toggleExempt = (bit: number) => {
+    if (!active) return;
+    dispatch({
+      type: "setSlotExemption",
+      key: active.key,
+      mask: activeSlotExempt ^ bit,
+    });
+  };
 
   const collapsedChips = TAGS.filter(
     (t: TagDef) => t.group === "core" || excludedTags & (1 << t.bit),
@@ -501,6 +547,20 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     ),
   );
 
+  const slotExemptionChips = TAGS.filter(
+    (t: TagDef) => activeSlotExempt & excludedTags & (1 << t.bit),
+  ).map((t) => (
+    <button
+      key={t.name}
+      className={`${styles.tagChip} ${styles.tagChipExempt}`}
+      aria-pressed={true}
+      title={`${t.label}: allowed in this slot despite the global exclusion — click to re-exclude`}
+      onClick={() => toggleExempt(1 << t.bit)}
+    >
+      {t.label}
+    </button>
+  ));
+
   const ledgerGroups: { group: TagDef["group"]; label: string }[] = [
     { group: "core", label: "core" },
     { group: "proper-subtype", label: "proper nouns" },
@@ -530,6 +590,29 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     </button>
   );
 
+  /** When a tag is excluded globally, the slot column becomes the exemption
+   * toggle: × = inherits the exclusion, + = this slot sees the tag anyway
+   * (every other slot stays constrained). */
+  const exemptCell = (tag: TagDef, exempt: boolean) => (
+    <button
+      className={
+        exempt
+          ? `${styles.ledgerCell} ${styles.ledgerCellExempt}`
+          : `${styles.ledgerCell} ${styles.ledgerCellOn}`
+      }
+      aria-pressed={exempt}
+      aria-label={`${tag.label} — exempt this slot from the global exclusion`}
+      title={
+        exempt
+          ? `${tag.label}: allowed in this slot despite the global exclusion — click to re-exclude`
+          : `${tag.label}: excluded everywhere — click to allow in this slot only`
+      }
+      onClick={() => toggleExempt(1 << tag.bit)}
+    >
+      {exempt ? "+" : "×"}
+    </button>
+  );
+
   const ledger = (
     <div className={styles.tagLedger} role="group" aria-label="Word-type exclusions">
       <div className={styles.ledgerRow} aria-hidden="true">
@@ -556,7 +639,10 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
                   {t.label}
                 </span>
                 {ledgerCell(t, globalOn, "everywhere", () => toggleGlobal(bit))}
-                {active && ledgerCell(t, slotOn, "in this slot", () => toggleSlot(bit))}
+                {active &&
+                  (globalOn
+                    ? exemptCell(t, (activeSlotExempt & bit) !== 0)
+                    : ledgerCell(t, slotOn, "in this slot", () => toggleSlot(bit)))}
               </div>
             );
           })}
@@ -692,6 +778,19 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
           {slotExclusionChips}
         </div>
       )}
+      {status === "ready" &&
+        !ledgerOpen &&
+        active &&
+        (activeSlotExempt & excludedTags) !== 0 && (
+          <div
+            className={styles.tagRow}
+            role="group"
+            aria-label="Slot exemptions from global exclusions"
+          >
+            <span className={styles.slotTagLabel}>this slot sees</span>
+            {slotExemptionChips}
+          </div>
+        )}
 
       {nextSlot && nextSlot.key !== slotKey && (
         <p className={styles.nextSlot}>
