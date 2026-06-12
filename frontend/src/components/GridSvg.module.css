@@ -71,6 +71,15 @@
   pointer-events: none;
 }
 
+.letterPencil {
+  /* Provisional graphite: autofill/forced letters the user hasn't claimed.
+   * Lighter than locked (72%) so the three registers stay distinct. */
+  font-family: var(--font-mono);
+  font-weight: 500;
+  fill: color-mix(in srgb, var(--ink) 52%, var(--paper));
+  pointer-events: none;
+}
+
 .lockMark {
   fill: var(--ink-muted);
   pointer-events: none;

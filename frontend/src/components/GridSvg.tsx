@@ -161,7 +161,13 @@ export const GridSvg = memo(function GridSvg({
                 x={x + CELL / 2}
                 y={y + CELL / 2 + (cell.value.length <= 1 ? 7 : 3)}
                 textAnchor="middle"
-                className={cell.locked ? styles.letterLocked : styles.letter}
+                className={
+                  cell.locked
+                    ? styles.letterLocked
+                    : cell.pencil != null
+                      ? styles.letterPencil
+                      : styles.letter
+                }
                 fontSize={fontSize}
               >
                 {cell.value}

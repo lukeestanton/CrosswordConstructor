@@ -60,6 +60,12 @@ export function editorReduce(editor: Editor, action: EditorAction): Editor {
 
   const next = reduce(editor.present, action);
   if (next === editor.present) return editor;
+  // The forced-entry pencil layer is derived state (re-computed from the
+  // engine after every real edit): recording it would make undo fight the
+  // derivation effect and clearing `future` would break redo chains.
+  if (action.type === "applyForced") {
+    return { ...editor, present: next };
+  }
   if (!isMutation(editor.present, next)) {
     return { ...editor, present: next };
   }

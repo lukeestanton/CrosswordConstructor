@@ -91,6 +91,18 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   const [ledgerOpen, setLedgerOpen] = useState(false);
   /** True when the wasm build predates the filter ops (init handshake). */
   const [engineStale, setEngineStale] = useState(false);
+  /** False when the wasm build predates autofill_seeded (init handshake). */
+  const [seedSupported, setSeedSupported] = useState(true);
+
+  /** Any penciled letter on the board makes reroll meaningful; derived from
+   * cells, so it survives reloads without extra state. */
+  const hasPencil = useMemo(
+    () =>
+      state.cells.some(
+        (c) => c.kind === "letter" && c.pencil != null && c.value !== "",
+      ),
+    [state.cells],
+  );
 
   // --- word-type filters ---------------------------------------------------
   const excludedTags = state.settings.excludedTags;
@@ -135,6 +147,7 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
         if (!alive) return;
         setWordCount(n);
         setEngineStale(!client.filtersSupported);
+        setSeedSupported(client.seedSupported);
         // Tags land before "ready" so the first candidates pass already
         // reflects a persisted filter; an empty/missing tag file is fine.
         const tags = await fetchWordtagsText();
@@ -488,21 +501,31 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     [active, dispatch],
   );
 
-  async function runAutofill() {
+  async function runAutofill(opts: { reroll?: boolean } = {}) {
     if (!clientRef.current || filling) return;
+    const reroll = opts.reroll === true;
     setFilling(true);
     setFillNote(null);
     try {
+      // Reroll: penciled letters become open cells again and a fresh random
+      // seed shifts the engine's deterministic retry ladder — user ink stays
+      // a constraint, so "keep my words, redo the rest".
+      const fillTemplate = reroll
+        ? gridToTemplate(state, { pencilAsEmpty: true })
+        : template;
+      const seed = reroll ? Math.floor(Math.random() * 0x1_0000_0000) : undefined;
       const result = await clientRef.current.autofill(
-        template,
+        fillTemplate,
         cutoff,
         undefined,
         slotFilterSpecs,
+        seed,
       );
       if (result.ok && result.grid) {
-        const fills = fillsFromResult(state, result.grid);
-        if (fills.length > 0) dispatch({ type: "applyFill", cells: fills });
-        setFillNote(`filled ${fills.length} cells`);
+        const fills = fillsFromResult(state, result.grid, { overwritePencil: reroll });
+        if (fills.length > 0)
+          dispatch({ type: "applyFill", cells: fills, pencil: "fill" });
+        setFillNote(`${reroll ? "rerolled" : "filled"} ${fills.length} cells`);
       } else {
         setFillNote(`autofill failed: ${result.reason ?? "unknown"}`);
         onOverlay({
@@ -563,6 +586,12 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
         <p className={styles.deadNote}>
           fill engine build is stale — word-type filters are inactive; run npm
           run build:wasm
+        </p>
+      )}
+      {status === "ready" && !engineStale && !seedSupported && (
+        <p className={styles.deadNote}>
+          fill engine build is stale — reroll is inactive; run npm run
+          build:wasm
         </p>
       )}
       {status === "ready" && (
@@ -655,13 +684,29 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
             </button>
           </>
         ) : (
-          <button
-            className={styles.autofillButton}
-            onClick={runAutofill}
-            disabled={status !== "ready"}
-          >
-            Autofill
-          </button>
+          <>
+            <button
+              className={styles.autofillButton}
+              onClick={() => runAutofill()}
+              disabled={status !== "ready"}
+            >
+              Autofill
+            </button>
+            {status === "ready" && hasPencil && (
+              <button
+                className={`${styles.statButton} data`}
+                onClick={() => runAutofill({ reroll: true })}
+                disabled={!seedSupported}
+                title={
+                  seedSupported
+                    ? "Refill the penciled letters from a fresh seed; your own letters stay"
+                    : "fill engine build is stale — run npm run build:wasm"
+                }
+              >
+                reroll
+              </button>
+            )}
+          </>
         )}
         <span className={`${styles.quiet}`}>{fillNote}</span>
         <span className="caps-label">{heatOn ? "heat on (`)" : "heat off (`)"}</span>
