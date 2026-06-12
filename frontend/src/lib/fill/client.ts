@@ -12,6 +12,9 @@ export interface SlotReport {
   down: boolean;
   len: number;
   options: number;
+  /** The lone surviving word when options === 1 (analyze only) — the
+   * forced-entry auto-pencil signal. Absent on stale wasm builds. */
+  only?: string | null;
 }
 
 export interface AnalyzeResult {
@@ -74,9 +77,18 @@ export class FillClient {
   private nextId = 1;
   /** Words loaded, set after init. */
   wordCount = 0;
+  /** The raw Crossfire dict text ("WORD;score" lines) after init — the
+   * show-filtered scan reads it host-side, since hidden words never reach
+   * the engine's slot options. */
+  get dictText(): string | null {
+    return this.dict;
+  }
   /** False when the wasm build predates the filter ops (init handshake) —
    * the UI must say so; silent no-op filters are how stale builds hide. */
   filtersSupported = true;
+  /** False when the wasm build predates autofill_seeded — reroll is hidden
+   * rather than silently rolling the same fill. */
+  seedSupported = true;
   /** Word-type filter state. It lives in the wasm module, not per-request
    * params, so it must survive every worker resurrection: re-applied at the
    * end of init() (which cancel()'s terminate+respawn path calls) and chained
@@ -156,14 +168,14 @@ export class FillClient {
       if (!res.ok) throw new Error(`wordlist fetch failed: ${res.status}`);
       this.dict = await res.text();
     }
-    const boot = await this.request<number | { count: number; hasFilters: boolean }>(
-      "init",
-      { dict: this.dict },
-    );
+    const boot = await this.request<
+      number | { count: number; hasFilters: boolean; hasSeed?: boolean }
+    >("init", { dict: this.dict });
     // A bare number is a pre-handshake worker: same vintage problem the
     // handshake exists to catch.
     this.wordCount = typeof boot === "number" ? boot : boot.count;
     this.filtersSupported = typeof boot === "number" ? false : boot.hasFilters;
+    this.seedSupported = typeof boot === "number" ? false : boot.hasSeed === true;
     if (this.tagsText !== null && this.filtersSupported) {
       await this.request("setTags", { tags: this.tagsText });
       await this.request("setGlobalFilter", { mask: this.globalMask });
@@ -241,12 +253,14 @@ export class FillClient {
     minScore: number,
     timeoutMs = 60_000,
     slotFilters?: SlotFilterSpec[],
+    seed?: number,
   ): Promise<FillResult> {
     return this.request<FillResult>("autofill", {
       template,
       minScore,
       timeoutMs,
       slotFiltersJson: slotFiltersJson(slotFilters),
+      seed,
     });
   }
 

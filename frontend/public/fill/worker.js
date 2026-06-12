@@ -32,6 +32,7 @@ self.onmessage = async (event) => {
           hasFilters:
             typeof wasm_bindgen.set_word_tags === "function" &&
             typeof wasm_bindgen.set_global_filter === "function",
+          hasSeed: typeof wasm_bindgen.autofill_seeded === "function",
         };
         break;
       case "setTags":
@@ -55,12 +56,25 @@ self.onmessage = async (event) => {
         );
         break;
       case "autofill":
-        result = wasm_bindgen.autofill(
-          args.template,
-          args.minScore,
-          args.timeoutMs,
-          args.slotFiltersJson ?? "",
-        );
+        // Seeded variant only when the host asks for a seed AND the wasm
+        // build has it — a stale build falls back to the unseeded search
+        // (the host knows via the hasSeed handshake and hides reroll).
+        if (args.seed != null && typeof wasm_bindgen.autofill_seeded === "function") {
+          result = wasm_bindgen.autofill_seeded(
+            args.template,
+            args.minScore,
+            args.timeoutMs,
+            args.slotFiltersJson ?? "",
+            args.seed,
+          );
+        } else {
+          result = wasm_bindgen.autofill(
+            args.template,
+            args.minScore,
+            args.timeoutMs,
+            args.slotFiltersJson ?? "",
+          );
+        }
         break;
       case "checkFillable":
         result = wasm_bindgen.check_fillable(

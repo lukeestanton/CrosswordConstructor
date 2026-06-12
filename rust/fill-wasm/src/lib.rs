@@ -11,7 +11,7 @@
 //! src/lib/fill/client.ts); `find_fill`'s own timeout is the backstop.
 
 use ingrid_core::arc_consistency::establish_arc_consistency_for_static_grid;
-use ingrid_core::backtracking_search::{find_fill, FillFailure};
+use ingrid_core::backtracking_search::{find_fill, find_fill_with_seed_offset, FillFailure};
 use ingrid_core::grid_config::{
     generate_grid_config_from_template_string, Direction, OwnedGridConfig,
 };
@@ -36,6 +36,9 @@ pub struct SlotReport {
     pub down: bool,
     pub len: usize,
     pub options: usize,
+    /// The lone surviving word (uppercase) when `options == 1` — the signal
+    /// for the editor's forced-entry auto-pencil. Only populated by `analyze`.
+    pub only: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -270,13 +273,23 @@ fn slot_report(config: &OwnedGridConfig, slot_id: usize, options: usize) -> Slot
         down: sc.direction == Direction::Down,
         len: sc.length,
         options,
+        only: None,
     }
 }
 
 #[wasm_bindgen]
 pub fn analyze(template: &str, min_score: u16, slot_filters_json: &str) -> Result<JsValue, JsError> {
+    let result = analyze_inner(template, min_score, slot_filters_json)?;
+    Ok(serde_wasm_bindgen::to_value(&result)?)
+}
+
+fn analyze_inner(
+    template: &str,
+    min_score: u16,
+    slot_filters_json: &str,
+) -> Result<AnalyzeResult, JsError> {
     let filters = parse_slot_filters(slot_filters_json)?;
-    let result = with_config(template, min_score, |config| {
+    with_config(template, min_score, |config| {
         apply_slot_filters(config, &filters);
         let cfg = config.to_config_ref();
         let width = config.width;
@@ -294,7 +307,15 @@ pub fn analyze(template: &str, min_score: u16, slot_filters_json: &str) -> Resul
                         .iter()
                         .filter(|w| !eliminated.contains(w))
                         .collect();
-                    slots.push(slot_report(config, slot_id, remaining.len()));
+                    let mut report = slot_report(config, slot_id, remaining.len());
+                    if remaining.len() == 1 {
+                        report.only = Some(
+                            config.word_list.words[slot_config.length][*remaining[0]]
+                                .canonical_string
+                                .to_uppercase(),
+                        );
+                    }
+                    slots.push(report);
 
                     // Distinct glyphs per cell over remaining options.
                     for (cell_idx, coord) in slot_config.cell_coords().iter().enumerate() {
@@ -331,8 +352,7 @@ pub fn analyze(template: &str, min_score: u16, slot_filters_json: &str) -> Resul
                 }
             }
         }
-    })?;
-    Ok(serde_wasm_bindgen::to_value(&result)?)
+    })
 }
 
 #[wasm_bindgen]
@@ -443,11 +463,48 @@ pub fn autofill(
     timeout_ms: u32,
     slot_filters_json: &str,
 ) -> Result<JsValue, JsError> {
+    let result = autofill_inner(template, min_score, timeout_ms, slot_filters_json, 0)?;
+    Ok(serde_wasm_bindgen::to_value(&result)?)
+}
+
+/// Autofill with a caller-supplied RNG seed offset: the editor's "reroll".
+/// Seed 0 follows the same retry sequence as `autofill`; any other value
+/// starts the deterministic seed ladder elsewhere, yielding a different
+/// (but reproducible) fill for the same constraints.
+#[wasm_bindgen]
+pub fn autofill_seeded(
+    template: &str,
+    min_score: u16,
+    timeout_ms: u32,
+    slot_filters_json: &str,
+    seed: u32,
+) -> Result<JsValue, JsError> {
+    let result = autofill_inner(
+        template,
+        min_score,
+        timeout_ms,
+        slot_filters_json,
+        u64::from(seed),
+    )?;
+    Ok(serde_wasm_bindgen::to_value(&result)?)
+}
+
+fn autofill_inner(
+    template: &str,
+    min_score: u16,
+    timeout_ms: u32,
+    slot_filters_json: &str,
+    seed_offset: u64,
+) -> Result<FillResult, JsError> {
     let filters = parse_slot_filters(slot_filters_json)?;
-    let result = with_config(template, min_score, |config| {
+    with_config(template, min_score, |config| {
         apply_slot_filters(config, &filters);
         let cfg = config.to_config_ref();
-        match find_fill(&cfg, Some(Duration::from_millis(u64::from(timeout_ms)))) {
+        match find_fill_with_seed_offset(
+            &cfg,
+            Some(Duration::from_millis(u64::from(timeout_ms))),
+            seed_offset,
+        ) {
             Ok(success) => {
                 // Overlay choices onto the template.
                 let mut rows: Vec<Vec<char>> = template
@@ -505,8 +562,7 @@ pub fn autofill(
                 FillResult { ok: false, grid: None, reason: Some(reason.into()), contested }
             }
         }
-    })?;
-    Ok(serde_wasm_bindgen::to_value(&result)?)
+    })
 }
 
 #[cfg(test)]
@@ -711,6 +767,50 @@ mod tests {
         set_global_filter(0);
         let result = candidates_inner("...\n...\n...", 0, 0, 0, false, 60, "").unwrap();
         assert!(!result.items.iter().any(|c| c.word == "ZZZ"));
+    }
+
+    #[test]
+    fn seeded_autofill_is_deterministic() {
+        init();
+        let a = autofill_inner("...\n...\n...", 0, 5000, "", 7).unwrap();
+        let b = autofill_inner("...\n...\n...", 0, 5000, "", 7).unwrap();
+        assert!(a.ok);
+        assert_eq!(a.grid, b.grid);
+    }
+
+    #[test]
+    fn seed_zero_fills_like_plain_autofill() {
+        init();
+        let seeded = autofill_inner("b..\n...\n...", 0, 5000, "", 0).unwrap();
+        assert!(seeded.ok);
+        // Constraints respected regardless of seed.
+        assert!(seeded.grid.unwrap().starts_with('b'));
+        let other = autofill_inner("b..\n...\n...", 0, 5000, "", 12345).unwrap();
+        assert!(other.ok);
+        assert!(other.grid.unwrap().starts_with('b'));
+    }
+
+    #[test]
+    fn analyze_reports_lone_option() {
+        init();
+        // Across (0,0) on "b.t" matches BIT and BAT, but BAT dies under arc
+        // consistency (no word here starts with A), so analyze must surface
+        // BIT as the slot's lone option — the auto-pencil signal.
+        let result = analyze_inner("b.t\n...\n...", 0, "").unwrap();
+        assert!(!result.contradiction);
+        let across = result
+            .slots
+            .iter()
+            .find(|s| s.x == 0 && s.y == 0 && !s.down)
+            .unwrap();
+        assert_eq!(across.options, 1);
+        assert_eq!(across.only.as_deref(), Some("BIT"));
+
+        // Ambiguous slots report no lone word.
+        let open = analyze_inner("...\n...\n...", 0, "").unwrap();
+        let across = open.slots.iter().find(|s| s.x == 0 && s.y == 0 && !s.down).unwrap();
+        assert!(across.options > 1);
+        assert!(across.only.is_none());
     }
 
     #[test]
