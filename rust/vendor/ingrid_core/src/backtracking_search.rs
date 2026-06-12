@@ -706,6 +706,19 @@ pub fn find_fill(
     config: &GridConfig,
     timeout: Option<Duration>,
 ) -> Result<FillSuccess, FillFailure> {
+    find_fill_with_seed_offset(config, timeout, 0)
+}
+
+/// VENDOR PATCH (see VENDORED.md): identical to `find_fill` except retry RNG seeds start at
+/// `seed_offset` (seed_offset, seed_offset + 1, ...), so callers can request a different
+/// deterministic fill while keeping the retry/backtrack-escalation behavior. `find_fill`
+/// delegates here with offset 0, which is bit-for-bit the original behavior.
+#[allow(dead_code)]
+pub fn find_fill_with_seed_offset(
+    config: &GridConfig,
+    timeout: Option<Duration>,
+    seed_offset: u64,
+) -> Result<FillSuccess, FillFailure> {
     let start = Instant::now();
     let deadline = timeout.map(|timeout| start + timeout);
 
@@ -777,7 +790,7 @@ pub fn find_fill(
             &slots,
             deadline,
             max_backtracks,
-            retry_num,
+            seed_offset.wrapping_add(retry_num),
             &mut crossing_weights,
         ) {
             Ok(mut result) => {

@@ -108,6 +108,116 @@ describe("enumerateAssignments", () => {
   });
 });
 
+describe("enumerateAssignments with a revealer", () => {
+  const rowOf = (a: ReturnType<typeof enumerateAssignments>[number], word: string) =>
+    a.find((p) => p.word === word)!.slot.cells[0].r;
+
+  it("last mode: revealer strictly below every other placement, bottom half", () => {
+    const parsed = parsePattern(PATTERN);
+    const assignments = enumerateAssignments(parsed, ["CAT", "DOG"], {
+      word: "CAT",
+      mode: "last",
+    });
+    expect(assignments.length).toBeGreaterThan(0);
+    for (const a of assignments) {
+      // Only rows 1 and 5 host 3-slots; bottom half of a 7-grid starts at 4.
+      expect(rowOf(a, "CAT")).toBe(5);
+      expect(rowOf(a, "DOG")).toBe(1);
+    }
+  });
+
+  it("last mode: rejects subsets where another slot shares the revealer's row", () => {
+    const parsed = parsePattern(PATTERN);
+    const assignments = enumerateAssignments(parsed, ["CAT", "DOG"], {
+      word: "CAT",
+      mode: "last",
+    });
+    for (const a of assignments) {
+      expect(rowOf(a, "CAT")).not.toBe(rowOf(a, "DOG"));
+    }
+  });
+
+  it("last mode: constrains across length groups too", () => {
+    const parsed = parsePattern(PATTERN);
+    const assignments = enumerateAssignments(parsed, ["CAT", "MAGNETO"], {
+      word: "CAT",
+      mode: "last",
+    });
+    expect(assignments.length).toBeGreaterThan(0);
+    for (const a of assignments) {
+      // The 7-slot at row 6 would sit below the revealer — never allowed.
+      expect(rowOf(a, "CAT")).toBe(5);
+      expect(rowOf(a, "MAGNETO")).toBeLessThan(5);
+    }
+  });
+
+  it("last mode: no bottom-half slot for the revealer drops the layout", () => {
+    // The only across 3-slot is row 0 of 3 — at/above the middle row.
+    const topOnly = parsePattern("...\n###\n###");
+    expect(
+      enumerateAssignments(topOnly, ["CAT"], { word: "CAT", mode: "last" }),
+    ).toEqual([]);
+  });
+
+  it("last mode: lone revealer still needs the bottom half, and finds it", () => {
+    const parsed = parsePattern(PATTERN);
+    const assignments = enumerateAssignments(parsed, ["MAGNETO"], {
+      word: "MAGNETO",
+      mode: "last",
+    });
+    expect(assignments.length).toBeGreaterThan(0);
+    for (const a of assignments) {
+      expect(rowOf(a, "MAGNETO")).toBeGreaterThan(3);
+    }
+  });
+
+  it("center mode: pins the revealer to the self-twin slot", () => {
+    const parsed = parsePattern(PATTERN);
+    const assignments = enumerateAssignments(parsed, ["MAGNETO", "ABCDEFG"], {
+      word: "MAGNETO",
+      mode: "center",
+    });
+    expect(assignments.length).toBeGreaterThan(0);
+    for (const a of assignments) {
+      expect(a.find((p) => p.word === "MAGNETO")!.slot.key).toBe("across:3,0");
+      expect(a.find((p) => p.word === "ABCDEFG")!.slot.key).not.toBe("across:3,0");
+    }
+  });
+
+  it("center mode: no self-twin slot of the revealer's length drops the layout", () => {
+    const parsed = parsePattern(PATTERN);
+    // 3-slots exist (rows 1 and 5) but none is its own twin.
+    expect(
+      enumerateAssignments(parsed, ["CAT"], { word: "CAT", mode: "center" }),
+    ).toEqual([]);
+  });
+
+  it("does not starve valid assignments under the caps", () => {
+    const parsed = parsePattern(PATTERN);
+    const assignments = enumerateAssignments(parsed, ["CAT", "DOG", "MAGNETO"], {
+      word: "CAT",
+      mode: "last",
+    });
+    expect(assignments.length).toBeGreaterThan(0);
+    expect(assignments.length).toBeLessThanOrEqual(MAX_ASSIGNMENTS_PER_LAYOUT);
+    for (const a of assignments) {
+      expect(rowOf(a, "CAT")).toBe(5);
+      expect(rowOf(a, "DOG")).toBe(1);
+      expect(rowOf(a, "MAGNETO")).toBeLessThan(5);
+    }
+  });
+
+  it("ignores a revealer that is not among the words", () => {
+    const parsed = parsePattern(PATTERN);
+    const plain = enumerateAssignments(parsed, ["CAT", "DOG"]);
+    const ignored = enumerateAssignments(parsed, ["CAT", "DOG"], {
+      word: "OWL",
+      mode: "last",
+    });
+    expect(ignored).toEqual(plain);
+  });
+});
+
 describe("assignmentTemplate", () => {
   it("writes words lowercase into the pattern", () => {
     const parsed = parsePattern(PATTERN);
@@ -138,5 +248,12 @@ describe("buildGridState", () => {
     const state = buildGridState(PATTERN, []);
     expect(state.cursor).toEqual({ r: 0, c: 0, orient: "across" });
     expect(state.cells.filter((c) => c.kind === "block")).toHaveLength(2);
+  });
+
+  it("inherits the word-type filter mask into settings", () => {
+    expect(buildGridState(PATTERN, []).settings.excludedTags).toBe(0);
+    expect(
+      buildGridState(PATTERN, [], { excludedTags: 5 }).settings.excludedTags,
+    ).toBe(5);
   });
 });

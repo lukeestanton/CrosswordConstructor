@@ -10,7 +10,7 @@
 
 import type { FillClient, FillVerdict } from "../fill/client";
 import { getVerdict, setVerdict, verdictKey } from "../fill/verify";
-import type { Assignment } from "./placement";
+import type { Assignment, RevealerSpec } from "./placement";
 import { assignmentTemplate, enumerateAssignments, parsePattern } from "./placement";
 
 export interface LayoutRow {
@@ -74,10 +74,18 @@ export async function rankLayouts(opts: {
   client: FillClient;
   layouts: LayoutRow[];
   words: string[];
+  /** Verdict-cache fingerprint of the worker's ACTUAL filter state (same
+   * "${mask}|" format as FillPanel's, so verdicts are legitimately shared
+   * with the editor). Must describe what the worker really applies — a
+   * stale-wasm session passes "0|" even if the user requested filters. */
+  filterSig: string;
+  /** Positional constraint for one of the words; layouts that can't host
+   * it drop out via empty assignments. */
+  revealer?: RevealerSpec;
   isStale: () => boolean;
   onUpdate: (rows: RankedLayout[]) => void;
 }): Promise<void> {
-  const { client, layouts, words, isStale, onUpdate } = opts;
+  const { client, layouts, words, filterSig, revealer, isStale, onUpdate } = opts;
   const cap = words.length > 0 ? ANALYZE_LAYOUTS_WITH_WORDS : ANALYZE_LAYOUTS_BROWSE;
   const rows: RankedLayout[] = layouts.slice(0, cap).map((layout) => ({
     layout,
@@ -95,10 +103,10 @@ export async function rankLayouts(opts: {
   for (const row of rows) {
     if (isStale()) return;
     const parsed = parsePattern(row.layout.pattern);
-    const assignments = enumerateAssignments(parsed, words);
+    const assignments = enumerateAssignments(parsed, words, revealer);
     if (assignments.length === 0) {
-      // Signature matching should prevent this; a layout that can't host the
-      // words anyway is silently dropped.
+      // Too few slots (signature matching should prevent that) or no
+      // placement satisfies the revealer constraint — silently dropped.
       row.status = "dropped";
       emit();
       continue;
@@ -136,8 +144,7 @@ export async function rankLayouts(opts: {
   let proven = 0;
   for (const row of candidates) {
     if (isStale() || proven >= VERIFY_STOP_AFTER) break;
-    // Layout ranking runs filter-free: empty filter signature.
-    const key = verdictKey(CUTOFF, "", row.template);
+    const key = verdictKey(CUTOFF, filterSig, row.template);
     let verdict: FillVerdict | undefined = getVerdict(key);
     if (verdict === undefined || verdict === "unknown") {
       verdict = await client.checkFillable(row.template, CUTOFF, VERIFY_TIMEOUT_MS);

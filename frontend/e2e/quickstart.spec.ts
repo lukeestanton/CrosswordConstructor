@@ -107,6 +107,195 @@ test("quick start ranks a layout, places the word, and creates the grid", async 
   expect([0, 6]).toContain(lockedIndexes[0]);
 });
 
+test("quick start honors word-type filters and the created grid inherits them", async ({
+  page,
+}) => {
+  let createdPayload: string | null = null;
+  await page.route("**/api/wordlist", (route) =>
+    route.fulfill({ contentType: "text/plain", body: DICT }),
+  );
+  // BOW (a crossing word in the only fill) is tagged PROPER (bit 0).
+  await page.route("**/api/wordtags", (route) =>
+    route.fulfill({ contentType: "text/plain", body: "BOW;1\n" }),
+  );
+  await page.route("**/api/layouts**", (route) =>
+    route.fulfill({
+      json: {
+        total: 1,
+        results: [
+          {
+            id: 1,
+            pattern: PATTERN,
+            width: 3,
+            height: 3,
+            word_count: 6,
+            block_count: 0,
+            max_slot_len: 3,
+            usage_count: 5,
+            last_used: "2020-01-01",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/grids", (route) => {
+    if (route.request().method() === "POST") {
+      createdPayload = route.request().postDataJSON().payload;
+      return route.fulfill({
+        status: 201,
+        json: { id: 42, title: "", width: 3, height: 3, rev: 0 },
+      });
+    }
+    return route.fulfill({ json: { results: [] } });
+  });
+  await page.route("**/api/grids/42", (route) =>
+    route.fulfill({
+      json: {
+        id: 42,
+        title: "",
+        width: 3,
+        height: 3,
+        payload: createdPayload,
+        rev: 0,
+        created_at: "2026-06-10T00:00:00",
+        updated_at: "2026-06-10T00:00:00",
+      },
+    }),
+  );
+  await page.route("**/api/grids/42/snapshots", (route) =>
+    route.fulfill({ json: { results: [] } }),
+  );
+
+  await page.goto("/grids");
+  await page.getByRole("button", { name: /quick start/i }).click();
+  const input = page.getByLabel("Must include");
+  await input.fill("bat");
+  await input.press("Enter");
+
+  const statusText = page.locator("div[class*=statusLine] span");
+  const rows = page.locator("ol[class*=results] li");
+
+  // Excluding "proper" hides BOW, killing the only fill (BAT/ONE/WAN over
+  // BOW/ANA/TEN) — the layout must not survive the scan, let alone prove.
+  await page.getByRole("button", { name: "proper", exact: true }).click();
+  await expect(statusText).toHaveText("1 published layout match", {
+    timeout: 20_000,
+  });
+  await expect(rows).toHaveCount(0);
+
+  // Relax "proper", exclude "abbr" instead: no dict word carries that tag,
+  // so the same fill proves — under the new signature, not a stale verdict.
+  await page.getByRole("button", { name: "proper", exact: true }).click();
+  await page.getByRole("button", { name: "abbr", exact: true }).click();
+  const row = rows.first().locator("button");
+  await expect(row.getByText("fill proven")).toBeVisible({ timeout: 20_000 });
+
+  // The created grid opens with the same exclusions active (ABBR = bit 1).
+  await row.click();
+  await expect(
+    page.getByRole("group", { name: "Grid editing surface" }),
+  ).toBeVisible({ timeout: 20_000 });
+  expect(createdPayload).not.toBeNull();
+  const state = JSON.parse(createdPayload!);
+  expect(state.settings.excludedTags).toBe(2);
+});
+
+test("revealer placement pins the word to the last across slot", async ({
+  page,
+}) => {
+  // DICT plus a second fill where BAT is the BOTTOM row: WEN/ERE/BAT over
+  // WEB/ERA/NET. Unconstrained, BAT can prove in row 0 or row 2; center is
+  // a contradiction either way (no word has B as its middle letter).
+  const REVEALER_DICT = DICT + "WEN;60\nERE;60\nWEB;60\nERA;60\nNET;60\n";
+  let createdPayload: string | null = null;
+  await page.route("**/api/wordlist", (route) =>
+    route.fulfill({ contentType: "text/plain", body: REVEALER_DICT }),
+  );
+  await page.route("**/api/layouts**", (route) =>
+    route.fulfill({
+      json: {
+        total: 1,
+        results: [
+          {
+            id: 1,
+            pattern: PATTERN,
+            width: 3,
+            height: 3,
+            word_count: 6,
+            block_count: 0,
+            max_slot_len: 3,
+            usage_count: 5,
+            last_used: "2020-01-01",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/grids", (route) => {
+    if (route.request().method() === "POST") {
+      createdPayload = route.request().postDataJSON().payload;
+      return route.fulfill({
+        status: 201,
+        json: { id: 42, title: "", width: 3, height: 3, rev: 0 },
+      });
+    }
+    return route.fulfill({ json: { results: [] } });
+  });
+  await page.route("**/api/grids/42", (route) =>
+    route.fulfill({
+      json: {
+        id: 42,
+        title: "",
+        width: 3,
+        height: 3,
+        payload: createdPayload,
+        rev: 0,
+        created_at: "2026-06-10T00:00:00",
+        updated_at: "2026-06-10T00:00:00",
+      },
+    }),
+  );
+  await page.route("**/api/grids/42/snapshots", (route) =>
+    route.fulfill({ json: { results: [] } }),
+  );
+
+  await page.goto("/grids");
+  await page.getByRole("button", { name: /quick start/i }).click();
+  const input = page.getByLabel("Must include");
+  await input.fill("bat");
+  await input.press("Enter");
+  await page.getByRole("button", { name: "Mark BAT as revealer" }).click();
+
+  const statusText = page.locator("div[class*=statusLine] span");
+  const rows = page.locator("ol[class*=results] li");
+
+  // Center mode pins BAT to the middle row — a contradiction in this dict,
+  // so the layout drops instead of falling back to rows 0/2.
+  await page.getByRole("radio", { name: "center row" }).click();
+  await expect(statusText).toHaveText("1 published layout match", {
+    timeout: 20_000,
+  });
+  await expect(rows).toHaveCount(0);
+
+  // Last mode: only the bottom row sits strictly below the middle row.
+  await page.getByRole("radio", { name: "last across" }).click();
+  const row = rows.first().locator("button");
+  await expect(row.getByText("fill proven")).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(
+    page.getByRole("group", { name: "Grid editing surface" }),
+  ).toBeVisible({ timeout: 20_000 });
+
+  expect(createdPayload).not.toBeNull();
+  const state = JSON.parse(createdPayload!);
+  const lockedIndexes = state.cells
+    .map((c: { locked?: boolean }, i: number) => (c.locked ? i : -1))
+    .filter((i: number) => i >= 0);
+  expect(lockedIndexes).toEqual([6, 7, 8]);
+  // The cursor opens on the revealer's slot.
+  expect(state.cursor).toEqual({ r: 2, c: 0, orient: "across" });
+});
+
 test("quick start with no words browses layouts and reports an empty library", async ({
   page,
 }) => {

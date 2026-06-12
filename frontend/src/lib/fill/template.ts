@@ -8,7 +8,15 @@
 import type { Slot } from "../grid/types";
 import type { GridState } from "../grid/types";
 
-export function gridToTemplate(state: GridState): string {
+export interface TemplateOpts {
+  /** Treat autofill-penciled letters as empty (reroll re-derives them). */
+  pencilAsEmpty?: boolean;
+  /** Treat forced-penciled letters as empty (the auto-pencil derivation
+   * must see the grid without its own output, or it could never retract). */
+  forcedAsEmpty?: boolean;
+}
+
+export function gridToTemplate(state: GridState, opts: TemplateOpts = {}): string {
   const rows: string[] = [];
   for (let r = 0; r < state.height; r++) {
     let row = "";
@@ -16,7 +24,13 @@ export function gridToTemplate(state: GridState): string {
       const cell = state.cells[r * state.width + c];
       if (cell.kind === "block") row += "#";
       else if (cell.value === "") row += ".";
-      else row += cell.value[0].toLowerCase();
+      else if (
+        !cell.locked &&
+        ((opts.pencilAsEmpty && cell.pencil != null) ||
+          (opts.forcedAsEmpty && cell.pencil === "forced"))
+      ) {
+        row += ".";
+      } else row += cell.value[0].toLowerCase();
     }
     rows.push(row);
   }
@@ -44,10 +58,12 @@ export function templateWithWord(template: string, slot: Slot, word: string): st
 
 /** Diff an autofill result grid back into per-cell writes for empty,
  * unlocked letter cells (applyFill skips locked ones anyway — belt and
- * suspenders). */
+ * suspenders). With `overwritePencil`, penciled letters are fair game too —
+ * reroll replaces them; user ink is still never touched. */
 export function fillsFromResult(
   state: GridState,
   resultGrid: string,
+  opts: { overwritePencil?: boolean } = {},
 ): { r: number; c: number; value: string }[] {
   const rows = resultGrid.split("\n");
   const fills: { r: number; c: number; value: string }[] = [];
@@ -56,7 +72,10 @@ export function fillsFromResult(
       const ch = rows[r][c];
       if (!/[a-zA-Z]/.test(ch)) continue;
       const cell = state.cells[r * state.width + c];
-      if (cell.kind !== "letter" || cell.locked || cell.value !== "") continue;
+      if (cell.kind !== "letter" || cell.locked) continue;
+      const replaceable =
+        cell.value === "" || (opts.overwritePencil === true && cell.pencil != null);
+      if (!replaceable) continue;
       fills.push({ r, c, value: ch.toUpperCase() });
     }
   }

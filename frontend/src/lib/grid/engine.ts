@@ -29,6 +29,7 @@ import type {
   Cursor,
   GridState,
   LetterCell,
+  Pencil,
   Settings,
   Slot,
   Symmetry,
@@ -57,9 +58,20 @@ export type Action =
   | { type: "selectSlot"; key: string }
   | { type: "setSettings"; settings: Partial<Settings> }
   | { type: "setSlotFilter"; key: string; mask: number }
+  | { type: "setSlotExemption"; key: string; mask: number }
   | { type: "setTitle"; title: string }
   | {
       type: "applyFill";
+      cells: { r: number; c: number; value: string }[];
+      /** "fill" marks the written letters as autofill pencil (reroll fodder);
+       * absent = ink (accepting a candidate is the user's own writing). */
+      pencil?: Pencil;
+    }
+  | {
+      /** Replace the forced-entry pencil layer: write the listed letters as
+       * pencil:"forced", clear any other currently-forced cell. Derived state
+       * — deliberately not an undo step (see history.ts). */
+      type: "applyForced";
       cells: { r: number; c: number; value: string }[];
     }
   | { type: "restore"; payload: GridState };
@@ -228,7 +240,7 @@ function placeLetter(state: GridState, ch: string): GridState {
   const value = ch.toUpperCase();
   const next = withCells(
     state,
-    setCell(state.cells, state.width, r, c, { ...cell, value }),
+    setCell(state.cells, state.width, r, c, { ...cell, value, pencil: undefined }),
   );
 
   const slot = activeSlot(next);
@@ -274,7 +286,7 @@ function backspace(state: GridState): GridState {
     if (cell.locked) return nudge(state);
     return withCells(
       state,
-      setCell(state.cells, state.width, r, c, { ...cell, value: "" }),
+      setCell(state.cells, state.width, r, c, { ...cell, value: "", pencil: undefined }),
     );
   }
 
@@ -289,7 +301,11 @@ function backspace(state: GridState): GridState {
   if (!prevCell.locked) {
     next = withCells(
       next,
-      setCell(next.cells, next.width, prev.r, prev.c, { ...prevCell, value: "" }),
+      setCell(next.cells, next.width, prev.r, prev.c, {
+        ...prevCell,
+        value: "",
+        pencil: undefined,
+      }),
     );
   } else {
     next = nudge(next);
@@ -305,7 +321,7 @@ function clearCell(state: GridState): GridState {
   if (cell.value === "") return state;
   return withCells(
     state,
-    setCell(state.cells, state.width, r, c, { ...cell, value: "" }),
+    setCell(state.cells, state.width, r, c, { ...cell, value: "", pencil: undefined }),
   );
 }
 
@@ -435,7 +451,7 @@ function setRebus(state: GridState, value: string): GridState {
   const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
   return withCells(
     state,
-    setCell(state.cells, state.width, r, c, { ...cell, value: cleaned }),
+    setCell(state.cells, state.width, r, c, { ...cell, value: cleaned, pencil: undefined }),
   );
 }
 
@@ -466,7 +482,12 @@ function toggleLockSlot(state: GridState): GridState {
   for (const { r, c } of slot.cells) {
     const cell = cells[r * state.width + c];
     if (cell.kind === "letter") {
-      cells = setCell(cells, state.width, r, c, { ...cell, locked: anyUnlocked });
+      // Locking is pinning: the letters become the user's own (ink).
+      cells = setCell(cells, state.width, r, c, {
+        ...cell,
+        locked: anyUnlocked,
+        pencil: anyUnlocked ? undefined : cell.pencil,
+      });
     }
   }
   return withCells(state, cells);
@@ -518,6 +539,7 @@ function setClue(state: GridState, key: string, text: string): GridState {
 function applyFill(
   state: GridState,
   fills: { r: number; c: number; value: string }[],
+  pencil?: Pencil,
 ): GridState {
   let cells = state.cells;
   for (const { r, c, value } of fills) {
@@ -527,7 +549,44 @@ function applyFill(
     cells = setCell(cells, state.width, r, c, {
       ...cell,
       value: value.toUpperCase(),
+      pencil, // undefined = ink: accepting a candidate clears stale pencil
     });
+  }
+  if (cells === state.cells) return state;
+  return withCells(state, cells);
+}
+
+/** Reconcile the forced-entry pencil layer to exactly `fills`: write the
+ * listed letters as pencil:"forced" (only over empty or already-forced
+ * cells — never ink, never locked), clear every other forced cell. */
+function applyForced(
+  state: GridState,
+  fills: { r: number; c: number; value: string }[],
+): GridState {
+  const wanted = new Map<number, string>();
+  for (const { r, c, value } of fills) {
+    if (inBounds(state, r, c)) wanted.set(r * state.width + c, value.toUpperCase());
+  }
+  let cells = state.cells;
+  for (let idx = 0; idx < cells.length; idx++) {
+    const cell = cells[idx];
+    if (cell.kind !== "letter" || cell.locked) continue;
+    const value = wanted.get(idx);
+    const isForced = cell.pencil === "forced";
+    if (value !== undefined && (cell.value === "" || isForced)) {
+      if (cell.value === value && isForced) continue;
+      cells = setCell(cells, state.width, Math.floor(idx / state.width), idx % state.width, {
+        ...cell,
+        value,
+        pencil: "forced",
+      });
+    } else if (value === undefined && isForced) {
+      cells = setCell(cells, state.width, Math.floor(idx / state.width), idx % state.width, {
+        ...cell,
+        value: "",
+        pencil: undefined,
+      });
+    }
   }
   if (cells === state.cells) return state;
   return withCells(state, cells);
@@ -590,10 +649,19 @@ export function reduce(state: GridState, action: Action): GridState {
       else slotFilters[action.key] = action.mask;
       return { ...state, slotFilters };
     }
+    case "setSlotExemption": {
+      if ((state.slotExemptions[action.key] ?? 0) === action.mask) return state;
+      const slotExemptions = { ...state.slotExemptions };
+      if (action.mask === 0) delete slotExemptions[action.key];
+      else slotExemptions[action.key] = action.mask;
+      return { ...state, slotExemptions };
+    }
     case "setTitle":
       return { ...state, title: action.title };
     case "applyFill":
-      return applyFill(state, action.cells);
+      return applyFill(state, action.cells, action.pencil);
+    case "applyForced":
+      return applyForced(state, action.cells);
     case "restore":
       return ensureCursor({
         ...normalizeGridState(action.payload),

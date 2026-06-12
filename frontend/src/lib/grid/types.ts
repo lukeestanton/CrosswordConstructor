@@ -16,12 +16,19 @@ export type Symmetry =
 
 export type BlockCell = { kind: "block" };
 
+/** Letter provenance: "fill" = written by autofill (reroll replaces these),
+ * "forced" = auto-penciled because the slot had exactly one viable option
+ * (the derivation layer adds/removes these). Absent = ink, i.e. the user's
+ * own writing. Every manual edit to a cell clears its pencil. */
+export type Pencil = "fill" | "forced";
+
 export interface LetterCell {
   kind: "letter";
   /** "" = empty; 1 char = letter; 2+ chars = rebus. Always uppercase. */
   value: string;
   circled: boolean;
   locked: boolean;
+  pencil?: Pencil;
 }
 
 export type Cell = BlockCell | LetterCell;
@@ -73,6 +80,11 @@ export interface GridState {
   /** Per-slot extra tag exclusions layered on settings.excludedTags, keyed
    * like `clues` by slot identity; absent key = no extra exclusions. */
   slotFilters: Record<string, number>;
+  /** Per-slot exemptions from settings.excludedTags: bits set here are
+   * IGNORED by the global filter for that slot (e.g. one themer slot may see
+   * proper nouns in a no-propers grid). Effective per-slot exclusion is
+   * (excludedTags & ~exemption) | slotFilter. Keyed by slot identity. */
+  slotExemptions: Record<string, number>;
 }
 
 export interface Slot {
@@ -114,6 +126,7 @@ export function makeGridState(width = 15, height = 15): GridState {
     nudge: 0,
     notice: null,
     slotFilters: {},
+    slotExemptions: {},
   };
 }
 
@@ -124,5 +137,6 @@ export function normalizeGridState(state: GridState): GridState {
     ...state,
     settings: { ...makeGridState().settings, ...state.settings },
     slotFilters: state.slotFilters ?? {},
+    slotExemptions: state.slotExemptions ?? {},
   };
 }

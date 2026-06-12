@@ -9,7 +9,11 @@ import { makeGridState } from "../grid/types";
 import type { Assignment } from "./placement";
 import { parsePattern } from "./placement";
 
-export function buildGridState(pattern: string, assignment: Assignment): GridState {
+export function buildGridState(
+  pattern: string,
+  assignment: Assignment,
+  opts?: { excludedTags?: number },
+): GridState {
   const { cells, width, height } = parsePattern(pattern);
   for (const { word, slot } of assignment) {
     slot.cells.forEach((pos, i) => {
@@ -26,6 +30,8 @@ export function buildGridState(pattern: string, assignment: Assignment): GridSta
   }
   const state = makeGridState(width, height);
   state.cells = cells;
+  // The editor opens with the same word-type filters the ranking ran under.
+  state.settings.excludedTags = opts?.excludedTags ?? 0;
   const start =
     assignment[0]?.slot.cells[0] ??
     (() => {

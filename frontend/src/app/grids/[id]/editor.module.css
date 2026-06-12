@@ -374,6 +374,13 @@
   font-style: italic;
 }
 
+.nextSlot {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: var(--sp-1) 0 0;
+}
+
 /* Two-scope filter ledger ("more"): every tag exactly once, grouped under
  * italic field labels, with an [all | slot] pair of toggle cells per row —
  * a reference-table register, no duplicated chip rows. */
@@ -431,6 +438,20 @@
   color: var(--accent);
 }
 
+.ledgerCellExempt {
+  /* Permissive exception: full ink, not accent — accent means "excluded"
+   * everywhere else in the filter language. */
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.tagChipExempt {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--ink-muted);
+  text-underline-offset: 2px;
+}
+
 .ledgerGroup {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
@@ -455,6 +476,57 @@
   width: 100%;
   text-align: left;
   padding: 2px 0;
+}
+
+/* Candidate line = accept button + tag affordance, side by side (nested
+ * buttons are invalid HTML, so the row is a flex pair). */
+.candLine {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+}
+
+.candLine .candRow {
+  flex: 1;
+  min-width: 0;
+}
+
+.tagAffordance {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+  background: none;
+  border: none;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.tagAffordance:hover,
+.tagAffordance[aria-expanded="true"] {
+  color: var(--accent);
+}
+
+/* Filtered-out rows: visible but explicitly not candidates. */
+.candFilteredRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+}
+
+.candFilteredWord {
+  font-family: var(--font-mono);
+  font-size: var(--fs-s);
+  color: var(--ink-muted);
+}
+
+.candFilteredTags {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-style: italic;
+  color: var(--accent);
 }
 
 .candRow:hover .candWord {

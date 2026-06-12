@@ -574,6 +574,22 @@ describe("undo/redo", () => {
     expect(ed.present.slotFilters["across:0,0"]).toBe(9);
   });
 
+  it("setSlotExemption is undoable; mask 0 drops the key", () => {
+    let ed = makeEditor(withCursor(grid(["...", "...", "..."]), 0, 0));
+    ed = runEditor(ed, { type: "setSlotExemption", key: "across:0,0", mask: 1 });
+    expect(ed.present.slotExemptions["across:0,0"]).toBe(1);
+    expect(ed.past).toHaveLength(1);
+
+    // No-op repeat: no history entry.
+    ed = runEditor(ed, { type: "setSlotExemption", key: "across:0,0", mask: 1 });
+    expect(ed.past).toHaveLength(1);
+
+    ed = runEditor(ed, { type: "setSlotExemption", key: "across:0,0", mask: 0 });
+    expect("across:0,0" in ed.present.slotExemptions).toBe(false);
+    ed = runEditor(ed, { type: "undo" });
+    expect(ed.present.slotExemptions["across:0,0"]).toBe(1);
+  });
+
   it("global excludedTags is a setting, not an undo step", () => {
     let ed = makeEditor(withCursor(grid(["..."]), 0, 0));
     ed = runEditor(ed, { type: "setSettings", settings: { excludedTags: 3 } });
@@ -586,10 +602,12 @@ describe("undo/redo", () => {
     const legacy = JSON.parse(JSON.stringify(original)) as GridState;
     // Simulate a payload saved before word-type filters existed.
     delete (legacy as Partial<GridState>).slotFilters;
+    delete (legacy as Partial<GridState>).slotExemptions;
     delete (legacy.settings as Partial<GridState["settings"]>).excludedTags;
     let ed = makeEditor(original);
     ed = runEditor(ed, { type: "restore", payload: legacy });
     expect(ed.present.slotFilters).toEqual({});
+    expect(ed.present.slotExemptions).toEqual({});
     expect(ed.present.settings.excludedTags).toBe(0);
   });
 
@@ -629,5 +647,143 @@ describe("symmetryTwins", () => {
   it("center cell of rotational has no twin", () => {
     const state = grid(["...", "...", "..."], { symmetry: "rotational" });
     expect(symmetryTwins(state, 1, 1)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------- pencil layer
+
+function pencilAt(state: GridState, r: number, c: number): string | undefined {
+  const cell = state.cells[r * state.width + c];
+  return cell.kind === "letter" ? cell.pencil : undefined;
+}
+
+describe("pencil provenance", () => {
+  it("applyFill with pencil marks letters as autofill pencil; without, as ink", () => {
+    const state = grid(["..."]);
+    const penciled = run(state, {
+      type: "applyFill",
+      cells: [{ r: 0, c: 0, value: "C" }],
+      pencil: "fill",
+    });
+    expect(valueAt(penciled, 0, 0)).toBe("C");
+    expect(pencilAt(penciled, 0, 0)).toBe("fill");
+
+    const inked = run(state, {
+      type: "applyFill",
+      cells: [{ r: 0, c: 1, value: "A" }],
+    });
+    expect(pencilAt(inked, 0, 1)).toBeUndefined();
+  });
+
+  it("accepting an ink fill over penciled letters clears their pencil", () => {
+    let state = run(grid(["..."]), {
+      type: "applyFill",
+      cells: [{ r: 0, c: 0, value: "C" }],
+      pencil: "fill",
+    });
+    state = run(state, { type: "applyFill", cells: [{ r: 0, c: 0, value: "B" }] });
+    expect(valueAt(state, 0, 0)).toBe("B");
+    expect(pencilAt(state, 0, 0)).toBeUndefined();
+  });
+
+  it.each([
+    ["typing", { type: "letter", ch: "Q" } as Action],
+    ["rebus", { type: "setRebus", value: "QT" } as Action],
+  ])("%s over a penciled cell inks it", (_label, action) => {
+    let state = withCursor(grid(["..."]), 0, 0);
+    state = run(state, {
+      type: "applyFill",
+      cells: [{ r: 0, c: 0, value: "C" }],
+      pencil: "fill",
+    });
+    state = run(state, action);
+    expect(pencilAt(state, 0, 0)).toBeUndefined();
+  });
+
+  it("backspace and delete clear pencil along with the letter", () => {
+    let state = withCursor(grid(["..."]), 0, 0);
+    state = run(state, {
+      type: "applyFill",
+      cells: [
+        { r: 0, c: 0, value: "C" },
+        { r: 0, c: 1, value: "A" },
+      ],
+      pencil: "fill",
+    });
+    const afterDelete = run(state, { type: "delete" });
+    expect(valueAt(afterDelete, 0, 0)).toBe("");
+    expect(pencilAt(afterDelete, 0, 0)).toBeUndefined();
+
+    // Backspace on an empty cell clears the previous cell — pencil included.
+    let prevClear = run(state, { type: "delete" }); // (0,0) now empty
+    prevClear = withCursor(prevClear, 0, 1);
+    prevClear = run(prevClear, { type: "backspace" }); // in-place: (0,1) has A
+    expect(valueAt(prevClear, 0, 1)).toBe("");
+    expect(pencilAt(prevClear, 0, 1)).toBeUndefined();
+  });
+
+  it("locking a slot inks its pencil (pin = the user's own writing)", () => {
+    let state = withCursor(grid(["..."]), 0, 0);
+    state = run(state, {
+      type: "applyFill",
+      cells: [
+        { r: 0, c: 0, value: "C" },
+        { r: 0, c: 1, value: "A" },
+        { r: 0, c: 2, value: "T" },
+      ],
+      pencil: "fill",
+    });
+    state = run(state, { type: "toggleLockSlot" });
+    const cell = state.cells[0];
+    expect(cell.kind === "letter" && cell.locked).toBe(true);
+    expect(pencilAt(state, 0, 0)).toBeUndefined();
+  });
+
+  it("applyForced replaces the forced layer and never touches ink or fill pencil", () => {
+    let state = withCursor(grid(["B.."]), 0, 0);
+    state = run(state, {
+      type: "applyFill",
+      cells: [{ r: 0, c: 2, value: "T" }],
+      pencil: "fill",
+    });
+    state = run(state, {
+      type: "applyForced",
+      cells: [
+        { r: 0, c: 0, value: "X" }, // ink cell: must be ignored
+        { r: 0, c: 1, value: "I" },
+      ],
+    });
+    expect(valueAt(state, 0, 0)).toBe("B"); // ink untouched
+    expect(valueAt(state, 0, 1)).toBe("I");
+    expect(pencilAt(state, 0, 1)).toBe("forced");
+    expect(pencilAt(state, 0, 2)).toBe("fill"); // fill pencil untouched
+
+    // Reconcile to an empty layer: forced letters retract, others stand.
+    state = run(state, { type: "applyForced", cells: [] });
+    expect(valueAt(state, 0, 1)).toBe("");
+    expect(pencilAt(state, 0, 1)).toBeUndefined();
+    expect(valueAt(state, 0, 2)).toBe("T");
+  });
+
+  it("applyForced is not an undo step; applyFill is", () => {
+    let ed = makeEditor(withCursor(grid(["..."]), 0, 0));
+    ed = runEditor(ed, {
+      type: "applyFill",
+      cells: [{ r: 0, c: 0, value: "C" }],
+      pencil: "fill",
+    });
+    expect(ed.past).toHaveLength(1);
+    ed = runEditor(ed, {
+      type: "applyForced",
+      cells: [{ r: 0, c: 1, value: "A" }],
+    });
+    expect(ed.past).toHaveLength(1); // unchanged
+    expect(valueAt(ed.present, 0, 1)).toBe("A");
+
+    // Redo chain survives a forced reconcile.
+    ed = runEditor(ed, { type: "undo" });
+    expect(ed.future).toHaveLength(1);
+    ed = runEditor(ed, { type: "applyForced", cells: [] });
+    expect(ed.future).toHaveLength(1);
   });
 });
