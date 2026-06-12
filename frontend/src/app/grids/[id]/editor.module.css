@@ -374,6 +374,13 @@
   font-style: italic;
 }
 
+.nextSlot {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: var(--sp-1) 0 0;
+}
+
 /* Two-scope filter ledger ("more"): every tag exactly once, grouped under
  * italic field labels, with an [all | slot] pair of toggle cells per row —
  * a reference-table register, no duplicated chip rows. */

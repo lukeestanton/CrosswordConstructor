@@ -28,7 +28,7 @@ import {
 import { getVerdict, setVerdict, verdictKey } from "@/lib/fill/verify";
 import { fetchWordtagsText } from "@/lib/fill/wordtags";
 import type { EditorAction } from "@/lib/grid/history";
-import { activeSlot } from "@/lib/grid/slots";
+import { activeSlot, slotComplete, slotKey as slotKeyFor, slotsOf } from "@/lib/grid/slots";
 import type { GridState } from "@/lib/grid/types";
 import styles from "./editor.module.css";
 
@@ -335,6 +335,30 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, template, cutoff, filterSig]);
 
+  // Most constrained incomplete slot under current filters — the "fill me
+  // next" hint. Pure derivation from the ambient analysis: zero engine work.
+  // Slots missing from byKey are stale analysis after a block edit; 0-option
+  // slots belong to the unfillable overlay, not to a recommendation.
+  const nextSlot = useMemo(() => {
+    if (status !== "ready" || !analysis || analysis.contradiction) return null;
+    const derived = slotsOf(state);
+    let best: { key: string; label: string; options: number } | null = null;
+    for (const s of analysis.slots) {
+      const key = slotKeyFor(s.down ? "down" : "across", s.y, s.x);
+      const slot = derived.byKey.get(key);
+      if (!slot || slot.cells.length !== s.len) continue;
+      if (slotComplete(state, slot) || s.options === 0) continue;
+      if (!best || s.options < best.options) {
+        best = {
+          key,
+          label: `${slot.number}-${slot.orient === "across" ? "Across" : "Down"}`,
+          options: s.options,
+        };
+      }
+    }
+    return best;
+  }, [status, analysis, state]);
+
   // Stable partition: proven-dead candidates sink, score order preserved
   // within each group; rows reorder as verdicts stream in.
   const ordered = useMemo(() => {
@@ -613,6 +637,20 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
           <span className={styles.slotTagLabel}>this slot</span>
           {slotExclusionChips}
         </div>
+      )}
+
+      {nextSlot && nextSlot.key !== slotKey && (
+        <p className={styles.nextSlot}>
+          <span className={styles.slotTagLabel}>next</span>
+          <button
+            className={`${styles.statButton} data`}
+            aria-label={`Jump to most constrained slot, ${nextSlot.label}`}
+            onClick={() => dispatch({ type: "selectSlot", key: nextSlot.key })}
+          >
+            {nextSlot.label} · {nextSlot.options.toLocaleString()}{" "}
+            {nextSlot.options === 1 ? "option" : "options"}
+          </button>
+        </p>
       )}
 
       {gridVerdict === "unfillable" && (
