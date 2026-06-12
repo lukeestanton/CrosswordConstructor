@@ -478,6 +478,57 @@
   padding: 2px 0;
 }
 
+/* Candidate line = accept button + tag affordance, side by side (nested
+ * buttons are invalid HTML, so the row is a flex pair). */
+.candLine {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+}
+
+.candLine .candRow {
+  flex: 1;
+  min-width: 0;
+}
+
+.tagAffordance {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--ink-muted);
+  background: none;
+  border: none;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.tagAffordance:hover,
+.tagAffordance[aria-expanded="true"] {
+  color: var(--accent);
+}
+
+/* Filtered-out rows: visible but explicitly not candidates. */
+.candFilteredRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0;
+}
+
+.candFilteredWord {
+  font-family: var(--font-mono);
+  font-size: var(--fs-s);
+  color: var(--ink-muted);
+}
+
+.candFilteredTags {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-style: italic;
+  color: var(--accent);
+}
+
 .candRow:hover .candWord {
   color: var(--accent);
 }

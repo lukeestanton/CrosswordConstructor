@@ -21,7 +21,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..db import get_session
-from ..models import WordTagOverride
+from ..models import WordTag, WordTagOverride
 
 router = APIRouter(prefix="/api/wordtags", tags=["wordtags"])
 
@@ -72,13 +72,40 @@ def get_wordtags(request: Request, session: Session = Depends(get_session)) -> R
     )
 
 
+def _normalize(word: str) -> str:
+    normalized = word.strip().upper()
+    if not re.fullmatch(r"[A-Z]+", normalized):
+        raise HTTPException(status_code=422, detail="word must be A-Z letters only")
+    return normalized
+
+
+@router.get("/{word}")
+def get_word(word: str, session: Session = Depends(get_session)) -> dict:
+    """Single-word detail for the tag editor: the merged mask plus what each
+    layer says, so the UI can show "override" vs machine tagging."""
+    normalized = _normalize(word)
+    tag = session.get(WordTag, normalized)
+    override = session.get(WordTagOverride, normalized)
+    machine_mask = tag.mask if tag is not None else 0
+    return {
+        "word": normalized,
+        "mask": override.mask if override is not None else machine_mask,
+        "machine_mask": machine_mask,
+        "override": None
+        if override is None
+        else {
+            "mask": override.mask,
+            "familiarity": override.familiarity,
+            "note": override.note,
+        },
+    }
+
+
 @router.put("/{word}")
 def put_override(
     word: str, body: OverridePut, session: Session = Depends(get_session)
 ) -> dict:
-    normalized = word.strip().upper()
-    if not re.fullmatch(r"[A-Z]+", normalized):
-        raise HTTPException(status_code=422, detail="word must be A-Z letters only")
+    normalized = _normalize(word)
 
     override = session.get(WordTagOverride, normalized)
     if override is None:
@@ -90,3 +117,16 @@ def put_override(
     override.updated_at = datetime.datetime.utcnow()
     session.commit()
     return {"word": normalized, "mask": body.mask}
+
+
+@router.delete("/{word}")
+def delete_override(word: str, session: Session = Depends(get_session)) -> dict:
+    """Revert to machine tagging: drop the override row. Idempotent; returns
+    the mask now in effect."""
+    normalized = _normalize(word)
+    override = session.get(WordTagOverride, normalized)
+    if override is not None:
+        session.delete(override)
+        session.commit()
+    tag = session.get(WordTag, normalized)
+    return {"word": normalized, "mask": tag.mask if tag is not None else 0}

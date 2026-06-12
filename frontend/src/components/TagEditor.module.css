@@ -1,0 +1,100 @@
+/* Per-word tag editor — same chip/ledger language as the fill panel:
+ * mono caps, strike-through = tagged, no cards, no shadows. */
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--rule-hair);
+  border-bottom: 1px solid var(--rule-hair);
+}
+
+.compact {
+  padding: var(--sp-1) 0 var(--sp-2) var(--sp-4);
+  border-bottom: none;
+}
+
+.group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-2);
+}
+
+.groupLabel {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-style: italic;
+  color: var(--ink-faint, var(--ink-muted));
+  min-width: 6.5em;
+}
+
+.chip {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: var(--ink-muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.chip:hover {
+  color: var(--accent);
+}
+
+.chipOn {
+  color: var(--ink);
+  text-decoration: line-through;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px;
+}
+
+.footer {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  margin-top: var(--sp-1);
+}
+
+.action {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  background: none;
+  border: none;
+  padding: 0;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.action:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.badge {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.note {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-style: italic;
+  color: var(--ink-muted);
+}

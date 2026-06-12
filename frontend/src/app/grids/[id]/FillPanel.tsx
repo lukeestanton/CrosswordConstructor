@@ -17,7 +17,9 @@ import {
   type SlotFilterSpec,
   type SlotReport,
 } from "@/lib/fill/client";
-import { TAGS, maskLabels, type TagDef } from "@/lib/fill/tags";
+import { TagEditor } from "@/components/TagEditor";
+import { scanFiltered, type FilteredCandidate } from "@/lib/fill/filteredScan";
+import { TAGS, maskLabels, parseTagText, type TagDef } from "@/lib/fill/tags";
 import {
   fillsFromResult,
   gridToTemplate,
@@ -26,9 +28,15 @@ import {
   templateWithWord,
 } from "@/lib/fill/template";
 import { getVerdict, setVerdict, verdictKey } from "@/lib/fill/verify";
-import { fetchWordtagsText } from "@/lib/fill/wordtags";
+import { fetchWordtagsText, invalidateWordtags } from "@/lib/fill/wordtags";
 import type { EditorAction } from "@/lib/grid/history";
-import { activeSlot, slotComplete, slotKey as slotKeyFor, slotsOf } from "@/lib/grid/slots";
+import {
+  activeSlot,
+  slotComplete,
+  slotEntry,
+  slotKey as slotKeyFor,
+  slotsOf,
+} from "@/lib/grid/slots";
 import type { GridState } from "@/lib/grid/types";
 import styles from "./editor.module.css";
 
@@ -100,6 +108,15 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   const [ledgerOpen, setLedgerOpen] = useState(false);
   /** True when the wasm build predates the filter ops (init handshake). */
   const [engineStale, setEngineStale] = useState(false);
+  /** Bumped after a tag override saves: folded into filterSig, so candidates,
+   * analysis, and every cached verdict recompute against the new tags. */
+  const [tagsRev, setTagsRev] = useState(0);
+  /** Word whose inline tag editor is open (candidate or filtered row). */
+  const [editingWord, setEditingWord] = useState<string | null>(null);
+  const [showFiltered, setShowFiltered] = useState(false);
+  const [filteredRows, setFilteredRows] = useState<FilteredCandidate[]>([]);
+  /** Parsed tag map cache, keyed by text identity (one parse per fetch). */
+  const tagMapRef = useRef<{ text: string; map: Map<string, number> } | null>(null);
   /** False when the wasm build predates autofill_seeded (init handshake). */
   const [seedSupported, setSeedSupported] = useState(true);
 
@@ -167,15 +184,19 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
       .sort(([a], [b]) => (a < b ? -1 : 1))
       .map(([k, m]) => `${k}:${m}`)
       .join(",");
-    return `${excludedTags}|${slots}|x${exemptions}`;
-  }, [excludedTags, state.slotFilters, state.slotExemptions]);
+    return `t${tagsRev}|${excludedTags}|${slots}|x${exemptions}`;
+  }, [excludedTags, state.slotFilters, state.slotExemptions, tagsRev]);
 
   // Collapse back to one page when the slot changes (render-time adjustment,
-  // so the first paint of a new slot never flashes the old page size).
+  // so the first paint of a new slot never flashes the old page size). The
+  // filtered view and any open tag editor are slot-scoped too.
   const [pagedSlotKey, setPagedSlotKey] = useState(slotKey);
   if (pagedSlotKey !== slotKey) {
     setPagedSlotKey(slotKey);
     setVisible(CAND_PAGE);
+    setShowFiltered(false);
+    setFilteredRows([]);
+    setEditingWord(null);
   }
 
   // --- engine boot -----------------------------------------------------
@@ -450,6 +471,51 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, inkTemplate, cutoff, filterSig]);
+
+  // --- tag corrections ------------------------------------------------------
+  /** After a save/revert in any TagEditor: refetch the merged tags (the
+   * session cache is invalidated and the fetch bypasses the browser cache),
+   * replay them into both workers, then bump tagsRev — which re-fires
+   * candidates/analysis and rotates every verdict-cache key in one move. */
+  const onTagsSaved = useCallback(async () => {
+    invalidateWordtags();
+    const text = await fetchWordtagsText();
+    if (text) await clientRef.current?.setTags(text).catch(() => undefined);
+    setTagsRev((r) => r + 1);
+  }, []);
+
+  /** What the active slot actually filters: global minus its exemptions,
+   * plus its extra exclusions. */
+  const activeEffectiveMask = (excludedTags & ~activeSlotExempt) | activeSlotMask;
+
+  // Show-filtered scan: dict-text walk for pattern matches that only the tag
+  // filters removed (the engine cannot list them — hidden words never reach
+  // slot options). On demand only; display-only rows.
+  useEffect(() => {
+    if (!showFiltered || status !== "ready" || !active || activeEffectiveMask === 0) {
+      // Nothing to scan; the render gates hide the block and slot changes
+      // clear stale rows (render-time adjustment above).
+      return;
+    }
+    let alive = true;
+    (async () => {
+      const dictText = clientRef.current?.dictText;
+      if (!dictText) return;
+      const text = await fetchWordtagsText();
+      if (!alive || !text) return;
+      if (!tagMapRef.current || tagMapRef.current.text !== text) {
+        tagMapRef.current = { text, map: parseTagText(text) };
+      }
+      const pattern = slotEntry(state, active);
+      setFilteredRows(
+        scanFiltered(dictText, tagMapRef.current.map, pattern, activeEffectiveMask, cutoff),
+      );
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showFiltered, status, slotKey, template, cutoff, activeEffectiveMask, tagsRev]);
 
   // Stable partition: proven-dead candidates sink, score order preserved
   // within each group; rows reorder as verdicts stream in.
@@ -836,22 +902,38 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
           const dead = verdicts.get(cand.word) === "unfillable";
           return (
             <li key={cand.word}>
-              <button
-                className={dead ? `${styles.candRow} ${styles.candDead}` : styles.candRow}
-                onClick={() => accept(cand.word)}
-                title={dead ? "No complete fill exists with this word" : undefined}
-              >
-                <span className={`${styles.candWord} data`}>{cand.word}</span>
-                <span className={styles.leaderDots} aria-hidden="true" />
-                <span className={`${styles.candFresh} data`}>
-                  {fresh
-                    ? fresh.count > 0
-                      ? `${fresh.count}× · ${fresh.lastSeen?.slice(0, 4) ?? ""}`
-                      : "unused"
-                    : "—"}
-                </span>
-                <span className={`${styles.candScore} data`}>{cand.score}</span>
-              </button>
+              <div className={styles.candLine}>
+                <button
+                  className={dead ? `${styles.candRow} ${styles.candDead}` : styles.candRow}
+                  onClick={() => accept(cand.word)}
+                  title={dead ? "No complete fill exists with this word" : undefined}
+                >
+                  <span className={`${styles.candWord} data`}>{cand.word}</span>
+                  <span className={styles.leaderDots} aria-hidden="true" />
+                  <span className={`${styles.candFresh} data`}>
+                    {fresh
+                      ? fresh.count > 0
+                        ? `${fresh.count}× · ${fresh.lastSeen?.slice(0, 4) ?? ""}`
+                        : "unused"
+                      : "—"}
+                  </span>
+                  <span className={`${styles.candScore} data`}>{cand.score}</span>
+                </button>
+                <button
+                  className={styles.tagAffordance}
+                  aria-label={`edit tags for ${cand.word}`}
+                  aria-expanded={editingWord === cand.word}
+                  title={`word types for ${cand.word}`}
+                  onClick={() =>
+                    setEditingWord((w) => (w === cand.word ? null : cand.word))
+                  }
+                >
+                  §
+                </button>
+              </div>
+              {editingWord === cand.word && (
+                <TagEditor word={cand.word} compact onSaved={onTagsSaved} />
+              )}
             </li>
           );
         })}
@@ -864,6 +946,58 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
           + {Math.min(CAND_STEP, cands.total - cands.items.length)} more ·{" "}
           {(cands.total - cands.items.length).toLocaleString()} hidden
         </button>
+      )}
+
+      {status === "ready" && active && activeEffectiveMask !== 0 && (
+        <p className={styles.nextSlot}>
+          <button
+            className={`${styles.statButton} data`}
+            aria-expanded={showFiltered}
+            onClick={() => setShowFiltered((s) => !s)}
+          >
+            {showFiltered ? "hide filtered" : "show filtered"}
+          </button>
+        </p>
+      )}
+      {showFiltered && status === "ready" && active && activeEffectiveMask !== 0 && (
+        <>
+          <p className={styles.slotTagLabel}>
+            excluded by filters — fix a wrong tag to restore a word
+          </p>
+          {filteredRows.length === 0 && (
+            <p className={styles.quiet}>No matches hidden by word-type filters.</p>
+          )}
+          <ul className={styles.candList}>
+            {filteredRows.map((row) => (
+              <li key={row.word}>
+                <div className={styles.candLine}>
+                  <span className={`${styles.candFilteredRow}`}>
+                    <span className={`${styles.candFilteredWord} data`}>{row.word}</span>
+                    <span className={styles.candFilteredTags}>
+                      {maskLabels(row.mask & activeEffectiveMask).join(", ")}
+                    </span>
+                    <span className={styles.leaderDots} aria-hidden="true" />
+                    <span className={`${styles.candScore} data`}>{row.score}</span>
+                  </span>
+                  <button
+                    className={styles.tagAffordance}
+                    aria-label={`edit tags for ${row.word}`}
+                    aria-expanded={editingWord === row.word}
+                    title={`word types for ${row.word}`}
+                    onClick={() =>
+                      setEditingWord((w) => (w === row.word ? null : row.word))
+                    }
+                  >
+                    §
+                  </button>
+                </div>
+                {editingWord === row.word && (
+                  <TagEditor word={row.word} compact onSaved={onTagsSaved} />
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
       )}
 
       <div className={styles.fillActions}>

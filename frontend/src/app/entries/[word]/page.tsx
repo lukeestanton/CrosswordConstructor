@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { TagEditor } from "@/components/TagEditor";
 import { getEntry } from "@/lib/api";
 import { formatCitationDate, formatShare, formatStatDate, yearOf } from "@/lib/format";
 import styles from "./entry.module.css";
@@ -157,6 +158,11 @@ export default async function EntryPage({
                 </div>
               )}
             </dl>
+          </section>
+
+          <section className={styles.sidebarBlock}>
+            <h2 className="caps-label">Word types</h2>
+            <TagEditor word={entry.answer} />
           </section>
         </aside>
       </div>
