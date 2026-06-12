@@ -84,8 +84,17 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
   const candSeq = useRef(0);
   const analyzeSeq = useRef(0);
   const verifySeq = useRef(0);
+  const forcedSeq = useRef(0);
 
   const template = useMemo(() => gridToTemplate(state), [state]);
+  /** The grid as the auto-pencil derivation must see it: without its own
+   * forced letters (or it could never retract them), with ink and autofill
+   * pencil as constraints. Same string after a forced write — that string
+   * equality is the loop guard for the derivation effect. */
+  const inkTemplate = useMemo(
+    () => gridToTemplate(state, { forcedAsEmpty: true }),
+    [state],
+  );
   const active = activeSlot(state);
   const slotKey = active?.key ?? null;
   const [ledgerOpen, setLedgerOpen] = useState(false);
@@ -358,6 +367,51 @@ export function FillPanel({ state, dispatch, heatOn, onOverlay }: Props) {
     }
     return best;
   }, [status, analysis, state]);
+
+  // --- forced-entry auto-pencil -------------------------------------------
+  // A slot with exactly one viable option gets that word written in pencil
+  // automatically; the layer is reconciled (not accumulated), so it retracts
+  // the moment an edit reopens the slot. Arc consistency runs to fixpoint, so
+  // one analyze pass surfaces every forced slot, cascades included. On a
+  // stale wasm build `only` never arrives and the layer just stays empty.
+  useEffect(() => {
+    if (status !== "ready") return;
+    const seq = ++forcedSeq.current;
+    const timer = setTimeout(async () => {
+      try {
+        const result = await clientRef.current!.analyze(
+          inkTemplate,
+          cutoff,
+          slotFilterSpecs,
+        );
+        if (forcedSeq.current !== seq) return;
+        const desired: { r: number; c: number; value: string }[] = [];
+        if (!result.contradiction) {
+          const derived = slotsOf(state);
+          for (const s of result.slots) {
+            if (s.options !== 1 || !s.only) continue;
+            const key = slotKeyFor(s.down ? "down" : "across", s.y, s.x);
+            const slot = derived.byKey.get(key);
+            if (!slot || slot.cells.length !== s.only.length) continue;
+            for (let i = 0; i < slot.cells.length; i++) {
+              const { r, c } = slot.cells[i];
+              const cell = state.cells[r * state.width + c];
+              if (cell.kind !== "letter" || cell.locked) continue;
+              if (cell.value === "" || cell.pencil === "forced") {
+                desired.push({ r, c, value: s.only[i] });
+              }
+            }
+          }
+        }
+        // The reducer reconciles; an unchanged layer is a no-op dispatch.
+        dispatch({ type: "applyForced", cells: desired });
+      } catch {
+        /* worker canceled/respawned — next edit re-derives */
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, inkTemplate, cutoff, filterSig]);
 
   // Stable partition: proven-dead candidates sink, score order preserved
   // within each group; rows reorder as verdicts stream in.
