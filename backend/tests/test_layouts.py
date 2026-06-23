@@ -239,6 +239,43 @@ def test_api_lengths_multiset_match(api_client):
     assert res.json()["total"] == 2
 
 
+def test_api_any_lengths_matches_either_orientation(api_client):
+    # PAIR_15's length-3 slots are both DOWN (signature (3, 0, 2)). A theme
+    # (across-required) 3 finds nothing; an "any" 3 finds PAIR_15 via its
+    # down slots.
+    res = api_client.get(
+        "/api/layouts", params={"width": 15, "height": 15, "lengths": "3"}
+    )
+    assert res.json()["total"] == 0
+    res = api_client.get(
+        "/api/layouts", params={"width": 15, "height": 15, "any_lengths": "3"}
+    )
+    body = res.json()
+    assert body["total"] == 1
+    assert body["results"][0]["pattern"] == PAIR_15
+
+
+def test_api_mixed_theme_and_any_lengths(api_client):
+    # length 7 needed by one theme word + one any word: needs across >= 1 and
+    # across+down >= 2. PAIR_15 (across 4, down 1) satisfies both; OPEN_15 has
+    # no 7-slots at all.
+    res = api_client.get(
+        "/api/layouts",
+        params={"width": 15, "height": 15, "lengths": "7", "any_lengths": "7"},
+    )
+    body = res.json()
+    assert body["total"] == 1
+    assert body["results"][0]["pattern"] == PAIR_15
+
+    # Same length demanded across+down beyond supply drops it: two theme 7s
+    # (across >= 2, fine) plus four any 7s pushes across+down >= 6 > 4+1=5.
+    res = api_client.get(
+        "/api/layouts",
+        params={"width": 15, "height": 15, "lengths": "7,7", "any_lengths": "7,7,7,7"},
+    )
+    assert res.json()["total"] == 0
+
+
 def test_api_max_word_count_filter(api_client):
     res = api_client.get(
         "/api/layouts", params={"width": 15, "height": 15, "max_word_count": 30}
@@ -246,6 +283,17 @@ def test_api_max_word_count_filter(api_client):
     body = res.json()
     assert body["total"] == 1
     assert body["results"][0]["pattern"] == OPEN_15  # 30 words
+
+
+def test_api_accepts_many_lengths_no_count_cap(api_client):
+    # No word-count cap: a long length list is accepted (200), not 422. These
+    # nine distinct lengths match no layout here, but the request is valid.
+    res = api_client.get(
+        "/api/layouts",
+        params={"width": 15, "height": 15, "lengths": "3,4,5,6,7,8,9,10,11"},
+    )
+    assert res.status_code == 200
+    assert res.json()["total"] == 0
 
 
 def test_api_rejects_bad_inputs(api_client):

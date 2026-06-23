@@ -68,13 +68,14 @@ test("quick start ranks a layout, places the word, and creates the grid", async 
   );
 
   await page.goto("/grids");
-  await page.getByRole("button", { name: /quick start/i }).click();
 
-  // Seed a must-include word once the engine is up.
+  // Focusing the form boots the engine; seed a must-include word.
   const input = page.getByLabel("Must include");
   await input.fill("bat");
   await input.press("Enter");
   await expect(page.getByRole("button", { name: "Remove BAT" })).toBeVisible();
+  // Words default to "anywhere"; pin BAT to an across slot for this scenario.
+  await page.getByRole("button", { name: "Set BAT to across only" }).click();
 
   // The layout streams in, gets analyzed, and the proof pass lands.
   await expect(page.getByText(/1 published layout match/)).toBeVisible({
@@ -167,10 +168,10 @@ test("quick start honors word-type filters and the created grid inherits them", 
   );
 
   await page.goto("/grids");
-  await page.getByRole("button", { name: /quick start/i }).click();
   const input = page.getByLabel("Must include");
   await input.fill("bat");
   await input.press("Enter");
+  await page.getByRole("button", { name: "Set BAT to across only" }).click();
 
   const statusText = page.locator("div[class*=statusLine] span");
   const rows = page.locator("ol[class*=results] li");
@@ -260,10 +261,11 @@ test("revealer placement pins the word to the last across slot", async ({
   );
 
   await page.goto("/grids");
-  await page.getByRole("button", { name: /quick start/i }).click();
   const input = page.getByLabel("Must include");
   await input.fill("bat");
   await input.press("Enter");
+  // Only across words can be a revealer — pin BAT across first.
+  await page.getByRole("button", { name: "Set BAT to across only" }).click();
   await page.getByRole("button", { name: "Mark BAT as revealer" }).click();
 
   const statusText = page.locator("div[class*=statusLine] span");
@@ -309,7 +311,8 @@ test("quick start with no words browses layouts and reports an empty library", a
     route.fulfill({ json: { total: 0, results: [] } }),
   );
   await page.goto("/grids");
-  await page.getByRole("button", { name: /quick start/i }).click();
+  // Focus the form (no word committed) to boot the engine and browse.
+  await page.getByLabel("Must include").click();
   // Browse-mode filters are visible without words…
   await expect(page.getByLabel("Max words")).toBeVisible();
   await expect(page.getByLabel("Sort")).toBeVisible();

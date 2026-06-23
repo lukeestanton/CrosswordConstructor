@@ -1,11 +1,20 @@
 /** Quick Start word placement: assign must-include words to slots of a
  * mined layout pattern.
  *
- * Pure data — no React, no engine. Words go in ACROSS slots only (the NYT
- * theme-entry convention; it also makes placements pairwise disjoint, so no
- * crossing-conflict checks). Equal-length words prefer rotationally
- * symmetric slot pairs, matching how theme entries are actually laid out.
- * Enumeration is capped: candidate slot subsets are scored (twin
+ * Pure data — no React, no engine. Must-include words come in two kinds:
+ *   - "theme": across slots only (the NYT theme-entry convention; equal-length
+ *     words prefer rotationally symmetric slot pairs). This is the original,
+ *     well-tested path — `enumerateAssignments` is unchanged.
+ *   - "any": placeable in an across OR down slot, anywhere a word "just needs
+ *     to be in the puzzle". Layered on top by `enumerateMustInclude`: for each
+ *     base theme assignment, `placeAnyWords` drops the any-words into slots
+ *     that are CELL-DISJOINT from everything already placed. v1 keeps all
+ *     must-include placements mutually disjoint (no crossing-letter logic) so
+ *     the template→analyze pipeline is unchanged — the fill engine fills the
+ *     crossings. This layering can miss mixed arrangements a full backtracker
+ *     would find; acceptable since the backend filter is only a coarse
+ *     pre-filter and the engine is the real fillability check.
+ * Enumeration is capped throughout: candidate slot subsets are scored (twin
  * completeness, then row spread) rather than exhaustively tried.
  */
 
@@ -36,11 +45,26 @@ export interface RevealerSpec {
   mode: "last" | "center";
 }
 
+/** "theme": across-only (NYT theme convention). "any": across OR down. */
+export type WordKind = "theme" | "any";
+
+export interface MustWord {
+  /** Uppercase A–Z. */
+  word: string;
+  kind: WordKind;
+}
+
 /** Subsets tried per word-length group, orderings tried per subset, and the
  * overall cap — bounds analyze-pass work per layout. */
 export const SUBSETS_PER_LENGTH = 4;
 export const ORDERINGS_PER_SUBSET = 2;
 export const MAX_ASSIGNMENTS_PER_LAYOUT = 6;
+/** Any-word extensions kept per base theme assignment, and the overall cap
+ * once theme bases are multiplied by any-word placements. */
+export const ANY_OPTIONS_PER_BASE = 3;
+export const MAX_ASSIGNMENTS_WITH_ANY = 10;
+/** Backtracking node budget for one base's any-word placement. */
+const ANY_NODE_CAP = 2000;
 /** When a length group has more slots than this, trim to the best-spread
  * ones before enumerating subsets (keeps C(m,k) tame on block-light grids). */
 const MAX_SLOTS_PER_LENGTH = 12;
@@ -242,6 +266,104 @@ export function enumerateAssignments(
     partials = next;
   }
   return partials.slice(0, MAX_ASSIGNMENTS_PER_LAYOUT).map((p) => p.acc);
+}
+
+const cellIndex = (pos: { r: number; c: number }, width: number): number =>
+  pos.r * width + pos.c;
+
+/** Extend one base (theme/across) assignment by placing the "any" words into
+ * across-OR-down slots that are CELL-DISJOINT from everything already placed.
+ * Backtracking, longest word first (most constrained), best-first slot order;
+ * returns up to ANY_OPTIONS_PER_BASE complete extensions. Returns `[base]`
+ * unchanged when there are no any-words. */
+function placeAnyWords(
+  parsed: ParsedPattern,
+  base: Assignment,
+  anyWords: string[],
+): Assignment[] {
+  if (anyWords.length === 0) return [base];
+
+  const used = new Set<number>();
+  for (const { slot } of base) {
+    for (const pos of slot.cells) used.add(cellIndex(pos, parsed.width));
+  }
+
+  // Slot pools per needed length: across and down, deterministically ordered
+  // (top-to-bottom, left-to-right, across before down) so results are stable.
+  const slotsByLen = new Map<number, Slot[]>();
+  for (const length of new Set(anyWords.map((w) => w.length))) {
+    const pool = parsed.slots
+      .filter((s) => s.cells.length === length)
+      .sort(
+        (a, b) =>
+          a.cells[0].r - b.cells[0].r ||
+          a.cells[0].c - b.cells[0].c ||
+          a.orient.localeCompare(b.orient),
+      );
+    slotsByLen.set(length, pool);
+  }
+
+  // Longest first: the scarcest slots get placed before the search fans out.
+  const order = [...anyWords].sort((a, b) => b.length - a.length);
+  const results: Assignment[] = [];
+  const acc: Placement[] = [];
+  let nodes = 0;
+
+  const recurse = (i: number): void => {
+    if (results.length >= ANY_OPTIONS_PER_BASE) return;
+    if (i === order.length) {
+      results.push([...base, ...acc]);
+      return;
+    }
+    if (++nodes > ANY_NODE_CAP) return;
+    const word = order[i];
+    for (const slot of slotsByLen.get(word.length) ?? []) {
+      const cells = slot.cells.map((pos) => cellIndex(pos, parsed.width));
+      if (cells.some((c) => used.has(c))) continue;
+      for (const c of cells) used.add(c);
+      acc.push({ word, slot });
+      recurse(i + 1);
+      acc.pop();
+      for (const c of cells) used.delete(c);
+      if (results.length >= ANY_OPTIONS_PER_BASE) return;
+    }
+  };
+  recurse(0);
+  return results;
+}
+
+/** Candidate assignments for a mix of theme (across-only) and any (across or
+ * down) must-include words, best-guess first, capped. Theme words are placed
+ * by the original `enumerateAssignments`; any words are layered on disjointly
+ * by `placeAnyWords`. The revealer is honored only when it names a theme word
+ * (its last/center geometry is across-defined). Empty when no placement fits. */
+export function enumerateMustInclude(
+  parsed: ParsedPattern,
+  words: MustWord[],
+  revealer?: RevealerSpec,
+): Assignment[] {
+  const themeWords = words.filter((w) => w.kind === "theme").map((w) => w.word);
+  const anyWords = words.filter((w) => w.kind === "any").map((w) => w.word);
+
+  // enumerateAssignments ignores a revealer not among its words, so passing it
+  // through is enough to make an "any"-word revealer a no-op.
+  const bases = enumerateAssignments(parsed, themeWords, revealer);
+  if (anyWords.length === 0) return bases;
+
+  const out: Assignment[] = [];
+  for (const base of bases) {
+    for (const extended of placeAnyWords(parsed, base, anyWords)) {
+      out.push(extended);
+      if (out.length >= MAX_ASSIGNMENTS_WITH_ANY) return out;
+    }
+  }
+  return out;
+}
+
+/** Count of length-3 slots (across + down) — layout-intrinsic, independent of
+ * any word placement. More 3-letter slots ≈ a worse puzzle. */
+export function countThreeSlots(parsed: ParsedPattern): number {
+  return parsed.slots.filter((s) => s.cells.length === 3).length;
 }
 
 /** The pattern with an assignment's words written in (engine template:

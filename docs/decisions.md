@@ -347,3 +347,45 @@ filter support is missing (FillClient also skips filter ops then, keeping
 the console clean); (2) `predev` runs `scripts/check-wasm.mjs`, an
 mtime comparison that warns loudly but never blocks (dev must boot without
 the Rust toolchain). CI is unaffected — it always rebuilds the wasm.
+
+## Quick Start: hero, orientation-flexible words, arrangements, 3-slot sort (2026-06-13)
+
+**Quick Start is now the hero of `/grids`; blank grid is demoted.** It led
+the slice but sat below the New-grid button as a collapsed accordion. Now a
+standing headline + form at the top, with "…or start a blank grid →" a quiet
+secondary row beneath the results. To keep the page cheap for a blank-grid
+user, the wasm engine no longer boots on expand — it **arms on first focus
+within the panel** (`onFocus` on the section) and disposes on unmount. A user
+who only wants a blank grid never pays for wasm + wordlist.
+
+**Two word kinds, not one.** Must-include words default to **"anywhere"**
+(across OR down) — toggle a chip to **"across only"** for a theme entry.
+Replaces the old across-only model. Only across/theme words can be the
+revealer (its last/center geometry is across-defined); toggling a starred
+word to "anywhere" un-stars it.
+
+**"Anywhere" placement is layered and cell-disjoint (v1).** Rather than
+rewrite the well-tested theme path, `enumerateMustInclude` keeps
+`enumerateAssignments` (theme/across) intact and, for each base, layers
+`placeAnyWords` — a small backtracking pass that drops the any-words into
+across- or down-slots whose cells are disjoint from everything already
+placed. No crossing-letter logic: all must-include placements stay mutually
+disjoint so the template→analyze pipeline is unchanged and the fill engine
+fills the crossings. This can miss mixed arrangements a full backtracker
+would find — acceptable, since the backend filter is only a coarse
+pre-filter and the engine is the real fillability check. Backend gained an
+`any_lengths` param: per length L, `across_count ≥ #theme(L)` and
+`across_count+down_count ≥ #theme(L)+#any(L)` — a necessary (not sufficient)
+multiset condition, `down_count` was already mined.
+
+**Same layout can surface multiple times.** The analyze pass already scored
+every enumerated arrangement and discarded all but the best; it now keeps the
+top `KEEP_PER_LAYOUT` (3) **distinct templates** per layout (deduped by exact
+template), each its own result row keyed by `layout.id:template`. Near-zero
+added cost — it retains work already done.
+
+**Results sort by fewest 3-letter slots.** More 3-slots ≈ a worse puzzle, so
+a client-side "Order" control offers `best fit` (fillability, the default)
+and `fewest 3-letter slots` (`threeCount` asc, computed once per layout from
+the parsed pattern). Distinct from the browse-only backend `sort`
+(popularity/blocks/words), which only orders the server pre-filter pool.

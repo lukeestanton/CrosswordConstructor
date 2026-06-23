@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest";
 import { buildGridState } from "./create";
 import {
   MAX_ASSIGNMENTS_PER_LAYOUT,
+  MAX_ASSIGNMENTS_WITH_ANY,
+  countThreeSlots,
   enumerateAssignments,
+  enumerateMustInclude,
   assignmentTemplate,
   parsePattern,
   twinOf,
+  type MustWord,
 } from "./placement";
 
 /** 7x7 rotationally symmetric test pattern:
@@ -215,6 +219,82 @@ describe("enumerateAssignments with a revealer", () => {
       mode: "last",
     });
     expect(ignored).toEqual(plain);
+  });
+});
+
+describe("countThreeSlots", () => {
+  it("counts length-3 slots across and down", () => {
+    // PATTERN: four across 3-slots (rows 1 & 5) + one down 3-slot (col 3).
+    expect(countThreeSlots(parsePattern(PATTERN))).toBe(5);
+  });
+});
+
+describe("enumerateMustInclude", () => {
+  const theme = (word: string): MustWord => ({ word, kind: "theme" });
+  const any = (word: string): MustWord => ({ word, kind: "any" });
+
+  const cellsOf = (a: ReturnType<typeof enumerateMustInclude>[number], width: number) =>
+    a.flatMap((p) => p.slot.cells.map((c) => c.r * width + c.c));
+
+  it("matches enumerateAssignments when there are no any-words", () => {
+    const parsed = parsePattern(PATTERN);
+    const layered = enumerateMustInclude(parsed, [theme("CAT"), theme("DOG")]);
+    const direct = enumerateAssignments(parsed, ["CAT", "DOG"]);
+    expect(layered).toEqual(direct);
+  });
+
+  it("places an any-word in a DOWN slot when no across slot of its length is free", () => {
+    // 3 rows × 4 cols: across slots are all length 4, down slots all length 3 —
+    // a length-3 word can only go down.
+    const parsed = parsePattern("....\n....\n....");
+    const assignments = enumerateMustInclude(parsed, [any("CAT")]);
+    expect(assignments.length).toBeGreaterThan(0);
+    for (const a of assignments) {
+      const cat = a.find((p) => p.word === "CAT")!;
+      expect(cat.slot.orient).toBe("down");
+      expect(cat.slot.cells.length).toBe(3);
+    }
+  });
+
+  it("an across-only theme word drops a layout with no across slot of its length", () => {
+    const parsed = parsePattern("....\n....\n....");
+    expect(enumerateMustInclude(parsed, [theme("CAT")])).toEqual([]);
+  });
+
+  it("keeps every placement cell-disjoint across the whole assignment", () => {
+    const parsed = parsePattern(PATTERN);
+    const assignments = enumerateMustInclude(parsed, [
+      theme("MAGNETO"),
+      any("DOG"),
+      any("OWL"),
+    ]);
+    expect(assignments.length).toBeGreaterThan(0);
+    for (const a of assignments) {
+      const cells = cellsOf(a, parsed.width);
+      expect(new Set(cells).size).toBe(cells.length);
+    }
+  });
+
+  it("ignores a revealer that names an any-word (revealer is across-defined)", () => {
+    const parsed = parsePattern(PATTERN);
+    const withRev = enumerateMustInclude(
+      parsed,
+      [theme("DOG"), any("CAT")],
+      { word: "CAT", mode: "last" },
+    );
+    const noRev = enumerateMustInclude(parsed, [theme("DOG"), any("CAT")]);
+    expect(withRev).toEqual(noRev);
+  });
+
+  it("respects the overall any-word cap", () => {
+    const parsed = parsePattern(PATTERN);
+    const assignments = enumerateMustInclude(parsed, [
+      theme("CAT"),
+      theme("DOG"),
+      any("PIG"),
+    ]);
+    expect(assignments.length).toBeLessThanOrEqual(MAX_ASSIGNMENTS_WITH_ANY);
+    expect(assignments.length).toBeGreaterThan(0);
   });
 });
 

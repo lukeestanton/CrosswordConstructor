@@ -1,10 +1,13 @@
 """Quick Start layout library: NYT-mined black-square patterns.
 
-Serves candidate starting layouts for the new-grid Quick Start. With
-``lengths``, results are layouts whose across slots can host words of those
-lengths (multiset match via the slot-length signature table); without, it is
-a browse of the whole library. Ordering here is a popularity pre-filter —
-real fillability ranking happens client-side in the wasm fill engine.
+Serves candidate starting layouts for the new-grid Quick Start. Must-include
+words come in two flavours: ``lengths`` are theme entries that must land in an
+ACROSS slot, ``any_lengths`` are words that may land across OR down. Results
+are layouts whose slot-length signature can host both (multiset match via the
+signature table); without either it is a browse of the whole library. The
+across/down counts are a *necessary* pre-filter only — they don't prove a
+mutually disjoint placement exists; the client wasm engine does the real
+fillability ranking. Ordering here is just a popularity pre-filter.
 """
 
 from __future__ import annotations
@@ -20,7 +23,6 @@ from ..db import get_session
 router = APIRouter(prefix="/api/layouts", tags=["layouts"])
 
 ALLOWED_SIZES = {15, 21}
-MAX_LENGTHS = 8
 
 SORTS = {
     "popular": "l.usage_count DESC, l.id",
@@ -36,8 +38,9 @@ def _parse_lengths(raw: str | None, width: int) -> list[int]:
         lengths = [int(part) for part in raw.split(",") if part.strip()]
     except ValueError:
         raise HTTPException(status_code=422, detail="lengths must be integers")
-    if len(lengths) > MAX_LENGTHS:
-        raise HTTPException(status_code=422, detail=f"at most {MAX_LENGTHS} lengths")
+    # No count cap: distinct lengths are inherently bounded by the 3..width
+    # range check below (at most width-2 of them), and duplicates just raise a
+    # length's required multiplicity.
     for n in lengths:
         if not 3 <= n <= width:
             raise HTTPException(
@@ -51,6 +54,7 @@ def list_layouts(
     width: int,
     height: int,
     lengths: str | None = None,
+    any_lengths: str | None = None,
     max_word_count: int | None = Query(default=None, ge=1),
     sort: str = "popular",
     limit: int = Query(default=60, ge=1, le=200),
@@ -61,7 +65,9 @@ def list_layouts(
         raise HTTPException(status_code=422, detail="size must be 15x15 or 21x21")
     if sort not in SORTS:
         raise HTTPException(status_code=422, detail=f"sort must be one of {sorted(SORTS)}")
-    need = Counter(_parse_lengths(lengths, width))
+    # Theme words need an across slot; "any" words take across OR down.
+    theme_need = Counter(_parse_lengths(lengths, width))
+    any_need = Counter(_parse_lengths(any_lengths, width))
 
     where = ["l.width = :w", "l.height = :h"]
     params: dict = {"w": width, "h": height}
@@ -69,14 +75,22 @@ def list_layouts(
         where.append("l.word_count <= :maxwc")
         params["maxwc"] = max_word_count
 
+    need = set(theme_need) | set(any_need)
     if need:
-        # Multiset match: one signature row must exist per distinct length,
-        # with enough across slots to host all words of that length.
+        # Multiset match per distinct length L: enough across slots for the
+        # theme words (across_count >= t), and enough slots total in either
+        # orientation for all words of that length (across+down >= t + a).
         conditions = []
-        for i, (length, count) in enumerate(sorted(need.items())):
-            conditions.append(f"(s.length = :len{i} AND s.across_count >= :cnt{i})")
+        for i, length in enumerate(sorted(need)):
+            t = theme_need[length]
+            comb = t + any_need[length]
+            conditions.append(
+                f"(s.length = :len{i} AND s.across_count >= :t{i} "
+                f"AND s.across_count + s.down_count >= :comb{i})"
+            )
             params[f"len{i}"] = length
-            params[f"cnt{i}"] = count
+            params[f"t{i}"] = t
+            params[f"comb{i}"] = comb
         params["n_conditions"] = len(conditions)
         base = (
             "FROM layouts l JOIN layout_slot_lengths s ON s.layout_id = l.id "

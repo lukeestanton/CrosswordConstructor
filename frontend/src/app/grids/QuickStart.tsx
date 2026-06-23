@@ -3,11 +3,16 @@
 /** Quick Start: NYT-mined layout suggestions, fillability-ranked.
  *
  * Pick a size, optionally enter must-include words; layouts mined from
- * published NYT grids stream in ranked by fillability, with the words
- * already placed in the assignment the analyze pass scored easiest to fill.
- * Clicking one creates the grid (placed words locked) and opens the editor.
- * Engine boots lazily on first expand and is disposed on collapse — the
- * grids page pays for wasm + wordlist only while the panel is open.
+ * published NYT grids stream in ranked by fillability, with the words already
+ * placed in the arrangement the analyze pass scored easiest to fill. Words are
+ * "anywhere" by default (across OR down); toggle a chip to "across only" to
+ * make it a theme entry (and to mark it as the revealer). The same pattern can
+ * surface under several arrangements. Clicking one creates the grid (placed
+ * words locked) and opens the editor.
+ *
+ * The panel is the hero of the grids page, but the wasm fill engine boots
+ * lazily on first interaction (focusing the form) — a user who just wants a
+ * blank grid never pays for wasm + wordlist.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -17,16 +22,17 @@ import { FillClient } from "@/lib/fill/client";
 import { CORE_TAGS } from "@/lib/fill/tags";
 import { fetchWordtagsText } from "@/lib/fill/wordtags";
 import { buildGridState, createGrid } from "@/lib/quickstart/create";
+import type { MustWord } from "@/lib/quickstart/placement";
 import {
-  compareRanked,
+  makeCompareRanked,
   rankLayouts,
   type LayoutRow,
   type RankedLayout,
+  type SortMode,
 } from "@/lib/quickstart/rank";
 import styles from "./quickstart.module.css";
 
 const SIZES = [15, 21] as const;
-const MAX_WORDS = 6;
 const WORD_RE = /^[A-Z]+$/;
 /** Streaming results re-sort in batches so rows don't thrash mid-scan. */
 const FLUSH_MS = 250;
@@ -39,16 +45,19 @@ type EngineStatus = "idle" | "loading" | "ready" | "error";
 
 export function QuickStart() {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  /** Flipped true on first interaction; boots the engine (see comment above). */
+  const [armed, setArmed] = useState(false);
   const [size, setSize] = useState<number>(15);
-  const [words, setWords] = useState<string[]>([]);
-  /** The starred must-include word, placed per revealerMode. */
+  const [words, setWords] = useState<MustWord[]>([]);
+  /** The starred must-include word (always an across/theme word). */
   const [revealer, setRevealer] = useState<string | null>(null);
   const [revealerMode, setRevealerMode] = useState<"last" | "center">("last");
   const [draft, setDraft] = useState("");
   const [wordNote, setWordNote] = useState<string | null>(null);
   const [maxWords, setMaxWords] = useState<number | null>(null);
   const [sort, setSort] = useState("popular");
+  /** Client-side ordering of the ranked results. */
+  const [resultsSort, setResultsSort] = useState<SortMode>("best");
   const [engine, setEngine] = useState<EngineStatus>("idle");
   const [excludedTags, setExcludedTags] = useState(0);
   /** True when the wasm build predates the filter ops (init handshake). */
@@ -65,12 +74,12 @@ export function QuickStart() {
   const pendingRows = useRef<RankedLayout[] | null>(null);
   const flushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // --- engine lifecycle: boot on expand, dispose on collapse ---------------
-  // "idle" while open renders as loading — the effect only flips to
+  // --- engine lifecycle: boot on first interaction, dispose on unmount -----
+  // "idle" while armed renders as loading — the effect only flips to
   // ready/error, so no synchronous setState in the effect body.
-  const engineStatus: EngineStatus = open && engine === "idle" ? "loading" : engine;
+  const engineStatus: EngineStatus = armed && engine === "idle" ? "loading" : engine;
   useEffect(() => {
-    if (!open) return;
+    if (!armed) return;
     const client = new FillClient();
     clientRef.current = client;
     let alive = true;
@@ -97,11 +106,8 @@ export function QuickStart() {
       generation.current++;
       client.dispose();
       clientRef.current = null;
-      setEngine("idle");
-      setRows([]);
-      setTotal(null);
     };
-  }, [open]);
+  }, [armed]);
 
   // --- word chips -----------------------------------------------------------
   const commitDraft = useCallback(
@@ -118,12 +124,10 @@ export function QuickStart() {
         return;
       }
       setWords((prev) => {
-        if (prev.includes(word)) return prev;
-        if (prev.length >= MAX_WORDS) {
-          setWordNote(`at most ${MAX_WORDS} words`);
-          return prev;
-        }
-        return [...prev, word];
+        if (prev.some((w) => w.word === word)) return prev;
+        // No count cap: the grid's slot supply and the "no matches" feedback
+        // are the real limits. Default placement is anywhere (across or down).
+        return [...prev, { word, kind: "any" }];
       });
       setDraft("");
     },
@@ -132,27 +136,42 @@ export function QuickStart() {
 
   /** Removing a word always un-stars it — every removal path goes here. */
   const removeWord = useCallback((word: string) => {
-    setWords((prev) => prev.filter((w) => w !== word));
+    setWords((prev) => prev.filter((w) => w.word !== word));
+    setRevealer((r) => (r === word ? null : r));
+  }, []);
+
+  /** Flip a word between "across only" (theme) and "anywhere". An "anywhere"
+   * word can't be the revealer, so toggling the revealer word un-stars it. */
+  const toggleKind = useCallback((word: string) => {
+    setWords((prev) =>
+      prev.map((w) =>
+        w.word === word
+          ? { ...w, kind: w.kind === "theme" ? "any" : "theme" }
+          : w,
+      ),
+    );
     setRevealer((r) => (r === word ? null : r));
   }, []);
 
   const pickSize = useCallback(
     (n: number) => {
       setSize(n);
-      const kept = words.filter((w) => w.length <= n);
+      const kept = words.filter((w) => w.word.length <= n);
       if (kept.length < words.length) {
         setWordNote(`dropped ${words.length - kept.length} word(s) longer than ${n}`);
         setWords(kept);
-        if (revealer !== null && !kept.includes(revealer)) setRevealer(null);
+        if (revealer !== null && !kept.some((w) => w.word === revealer)) {
+          setRevealer(null);
+        }
       }
     },
     [words, revealer],
   );
 
   // --- fetch + rank ---------------------------------------------------------
-  const wordsKey = words.join(",");
+  const wordsKey = words.map((w) => `${w.kind}:${w.word}`).join(",");
   useEffect(() => {
-    if (!open || engine !== "ready") return;
+    if (engine !== "ready") return;
     const gen = ++generation.current;
     const isStale = () => generation.current !== gen;
     const timer = setTimeout(async () => {
@@ -172,7 +191,14 @@ export function QuickStart() {
           height: String(size),
         });
         if (words.length > 0) {
-          params.set("lengths", words.map((w) => w.length).join(","));
+          const themeLengths = words
+            .filter((w) => w.kind === "theme")
+            .map((w) => w.word.length);
+          const anyLengths = words
+            .filter((w) => w.kind === "any")
+            .map((w) => w.word.length);
+          if (themeLengths.length) params.set("lengths", themeLengths.join(","));
+          if (anyLengths.length) params.set("any_lengths", anyLengths.join(","));
         } else {
           if (maxWords !== null) params.set("max_word_count", String(maxWords));
           params.set("sort", sort);
@@ -188,9 +214,10 @@ export function QuickStart() {
           words,
           filterSig: `${effectiveMask}|`,
           revealer: revealer !== null ? { word: revealer, mode: revealerMode } : undefined,
+          sortMode: resultsSort,
           isStale,
           onUpdate: (next) => {
-            pendingRows.current = next.slice().sort(compareRanked);
+            pendingRows.current = next.slice().sort(makeCompareRanked(resultsSort));
             if (flushTimer.current === null) {
               flushTimer.current = setTimeout(() => {
                 flushTimer.current = null;
@@ -213,7 +240,7 @@ export function QuickStart() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, engine, size, wordsKey, maxWords, sort, excludedTags, revealer, revealerMode]);
+  }, [engine, size, wordsKey, maxWords, sort, excludedTags, revealer, revealerMode, resultsSort]);
 
   // --- create ---------------------------------------------------------------
   const pick = useCallback(
@@ -251,47 +278,44 @@ export function QuickStart() {
   };
 
   return (
-    <section className={styles.section}>
-      <button
-        className={`${styles.toggle} caps-label`}
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        {open ? "− Quick start" : "+ Quick start"}
-      </button>
-      {!open && (
-        <span className={styles.tagline}>
-          start from a published NYT layout, seeded with your theme entries
-        </span>
-      )}
+    <section
+      className={styles.section}
+      onFocus={() => {
+        if (!armed) setArmed(true);
+      }}
+    >
+      <h2 className={`${styles.heading} caps-label`}>Quick start</h2>
+      <p className={styles.tagline}>
+        Start from a published NYT layout, seeded with your must-include words.
+      </p>
 
-      {open && (
-        <div className={styles.body}>
-          <div className={styles.controls}>
-            <span className={styles.control}>
-              <span className="caps-label">Size</span>
-              <span role="radiogroup" aria-label="Grid size" className={styles.sizes}>
-                {SIZES.map((n) => (
-                  <button
-                    key={n}
-                    role="radio"
-                    aria-checked={size === n}
-                    className={`${styles.sizeOption} data ${size === n ? styles.sizeOn : ""}`}
-                    onClick={() => pickSize(n)}
-                  >
-                    {n} × {n}
-                  </button>
-                ))}
-              </span>
+      <div className={styles.body}>
+        <div className={styles.controls}>
+          <span className={styles.control}>
+            <span className="caps-label">Size</span>
+            <span role="radiogroup" aria-label="Grid size" className={styles.sizes}>
+              {SIZES.map((n) => (
+                <button
+                  key={n}
+                  role="radio"
+                  aria-checked={size === n}
+                  className={`${styles.sizeOption} data ${size === n ? styles.sizeOn : ""}`}
+                  onClick={() => pickSize(n)}
+                >
+                  {n} × {n}
+                </button>
+              ))}
             </span>
+          </span>
 
-            <span className={styles.control}>
-              <label className="caps-label" htmlFor="qs-words">
-                Must include
-              </label>
-              <span className={styles.chips}>
-                {words.map((word) => (
-                  <span key={word} className={styles.chipWrap}>
+          <span className={styles.control}>
+            <label className="caps-label" htmlFor="qs-words">
+              Must include
+            </label>
+            <span className={styles.chips}>
+              {words.map(({ word, kind }) => (
+                <span key={word} className={styles.chipWrap}>
+                  {kind === "theme" && (
                     <button
                       className={
                         revealer === word
@@ -311,206 +335,236 @@ export function QuickStart() {
                     >
                       {revealer === word ? "★" : "☆"}
                     </button>
-                    <button
-                      className={`${styles.chip} data`}
-                      onClick={() => removeWord(word)}
-                      aria-label={`Remove ${word}`}
-                      title="Remove"
-                    >
-                      {word} ×
-                    </button>
-                  </span>
-                ))}
-                <input
-                  id="qs-words"
-                  className={`${styles.wordInput} data`}
-                  value={draft}
-                  placeholder={words.length === 0 ? "THEME ENTRIES…" : ""}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === ",") {
-                      e.preventDefault();
-                      commitDraft(draft);
-                    } else if (e.key === "Backspace" && draft === "") {
-                      const last = words[words.length - 1];
-                      if (last !== undefined) removeWord(last);
-                    }
-                  }}
-                  onBlur={() => commitDraft(draft)}
-                />
-              </span>
-            </span>
-
-            {revealer !== null && (
-              <span className={styles.control}>
-                <span className="caps-label">Revealer</span>
-                <span
-                  role="radiogroup"
-                  aria-label="Revealer placement"
-                  className={styles.sizes}
-                >
-                  {(["last", "center"] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      role="radio"
-                      aria-checked={revealerMode === mode}
-                      className={`${styles.sizeOption} data ${
-                        revealerMode === mode ? styles.sizeOn : ""
-                      }`}
-                      onClick={() => setRevealerMode(mode)}
-                    >
-                      {mode === "last" ? "last across" : "center row"}
-                    </button>
-                  ))}
-                </span>
-              </span>
-            )}
-
-            <span className={styles.control}>
-              <span className="caps-label" id="qs-exclude-label">
-                Exclude
-              </span>
-              <span
-                className={styles.tagChips}
-                role="group"
-                aria-labelledby="qs-exclude-label"
-              >
-                {CORE_TAGS.map((t) => {
-                  const on = (excludedTags & (1 << t.bit)) !== 0;
-                  return (
-                    <button
-                      key={t.name}
-                      className={
-                        on ? `${styles.tagChip} ${styles.tagChipOn}` : styles.tagChip
-                      }
-                      aria-pressed={on}
-                      title={
-                        on
-                          ? `${t.label}: excluded — click to allow`
-                          : `exclude ${t.label}`
-                      }
-                      onClick={() => setExcludedTags((m) => m ^ (1 << t.bit))}
-                    >
-                      {t.label}
-                    </button>
-                  );
-                })}
-              </span>
-            </span>
-
-            {words.length === 0 && (
-              <span className={styles.control}>
-                <label className="caps-label" htmlFor="qs-maxwords">
-                  Max words
-                </label>
-                <select
-                  id="qs-maxwords"
-                  className={`${styles.select} data`}
-                  value={maxWords ?? ""}
-                  onChange={(e) =>
-                    setMaxWords(e.target.value === "" ? null : Number(e.target.value))
-                  }
-                >
-                  <option value="">any</option>
-                  {MAX_WORD_COUNTS[size].map((n) => (
-                    <option key={n} value={n}>
-                      ≤ {n}
-                    </option>
-                  ))}
-                </select>
-                <label className="caps-label" htmlFor="qs-sort">
-                  Sort
-                </label>
-                <select
-                  id="qs-sort"
-                  className={`${styles.select} data`}
-                  value={sort}
-                  onChange={(e) => setSort(e.target.value)}
-                >
-                  <option value="popular">most used</option>
-                  <option value="blocks">fewest blocks</option>
-                  <option value="words">fewest words</option>
-                </select>
-              </span>
-            )}
-          </div>
-          {wordNote && <p className={styles.note}>{wordNote}</p>}
-          {revealer !== null &&
-            revealerMode === "center" &&
-            revealer.length % 2 !== size % 2 && (
-              <p className={styles.note}>
-                {revealer} ({revealer.length}) can&apos;t sit centered in a{" "}
-                {size}-wide grid — a centered slot here needs an odd-length
-                word.
-              </p>
-            )}
-          {excludedTags !== 0 && filtersStale && (
-            <p className={styles.note}>
-              fill engine build is stale — word-type filters are inactive; run
-              npm run build:wasm
-            </p>
-          )}
-          {excludedTags !== 0 && !filtersStale && tagsMissing && (
-            <p className={styles.note}>
-              word-type data unavailable — filters have no effect
-            </p>
-          )}
-
-          <div className={styles.statusLine}>
-            <span className="caps-label">
-              {engineStatus === "loading" && "loading engine…"}
-              {engineStatus === "error" && "fill engine unavailable"}
-              {engineStatus === "ready" &&
-                total !== null &&
-                `${total.toLocaleString()} published layout${total === 1 ? "" : "s"} match`}
-              {engineStatus === "ready" && scanning && " · ranking by fillability…"}
-            </span>
-          </div>
-
-          {engineStatus === "ready" && total === 0 && (
-            <p className={styles.note}>
-              {words.length > 0
-                ? `No published NYT ${size}×${size} layout hosts across slots of lengths ${words
-                    .map((w) => w.length)
-                    .join(", ")} — try fewer or different-length entries.`
-                : "No layouts in the library — run backend/scripts/build_layouts.py."}
-            </p>
-          )}
-
-          <ol className={styles.results}>
-            {rows.map((row) => {
-              const b = badge(row);
-              return (
-                <li key={row.layout.id}>
+                  )}
                   <button
-                    className={styles.resultRow}
-                    onClick={() => pick(row)}
-                    disabled={creating}
+                    className={styles.kind}
+                    aria-label={`Set ${word} to ${
+                      kind === "theme" ? "anywhere" : "across only"
+                    }`}
+                    title={
+                      kind === "theme"
+                        ? "across only (theme entry) — click to allow anywhere"
+                        : "anywhere (across or down) — click for across only"
+                    }
+                    onClick={() => toggleKind(word)}
                   >
-                    <LayoutPreview
-                      pattern={row.layout.pattern}
-                      assignment={row.assignment}
-                      size={size === 21 ? 132 : 116}
-                    />
-                    <span className={styles.resultMeta}>
-                      <span className="data">
-                        {row.layout.word_count} words · {row.layout.block_count}{" "}
-                        blocks · used {row.layout.usage_count}×
-                      </span>
-                      {row.layout.last_used && (
-                        <span className={`${styles.quiet} data`}>
-                          last published {row.layout.last_used}
-                        </span>
-                      )}
-                    </span>
-                    <span className={`${b.cls} caps-label`}>{b.text}</span>
+                    {kind === "theme" ? "across" : "anywhere"}
                   </button>
-                </li>
-              );
-            })}
-          </ol>
+                  <button
+                    className={`${styles.chip} data`}
+                    onClick={() => removeWord(word)}
+                    aria-label={`Remove ${word}`}
+                    title="Remove"
+                  >
+                    {word} ×
+                  </button>
+                </span>
+              ))}
+              <input
+                id="qs-words"
+                className={`${styles.wordInput} data`}
+                value={draft}
+                placeholder={words.length === 0 ? "WORDS TO INCLUDE…" : ""}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === ",") {
+                    e.preventDefault();
+                    commitDraft(draft);
+                  } else if (e.key === "Backspace" && draft === "") {
+                    const last = words[words.length - 1];
+                    if (last !== undefined) removeWord(last.word);
+                  }
+                }}
+                onBlur={() => commitDraft(draft)}
+              />
+            </span>
+          </span>
+
+          {revealer !== null && (
+            <span className={styles.control}>
+              <span className="caps-label">Revealer</span>
+              <span
+                role="radiogroup"
+                aria-label="Revealer placement"
+                className={styles.sizes}
+              >
+                {(["last", "center"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    role="radio"
+                    aria-checked={revealerMode === mode}
+                    className={`${styles.sizeOption} data ${
+                      revealerMode === mode ? styles.sizeOn : ""
+                    }`}
+                    onClick={() => setRevealerMode(mode)}
+                  >
+                    {mode === "last" ? "last across" : "center row"}
+                  </button>
+                ))}
+              </span>
+            </span>
+          )}
+
+          <span className={styles.control}>
+            <span className="caps-label" id="qs-exclude-label">
+              Exclude
+            </span>
+            <span
+              className={styles.tagChips}
+              role="group"
+              aria-labelledby="qs-exclude-label"
+            >
+              {CORE_TAGS.map((t) => {
+                const on = (excludedTags & (1 << t.bit)) !== 0;
+                return (
+                  <button
+                    key={t.name}
+                    className={
+                      on ? `${styles.tagChip} ${styles.tagChipOn}` : styles.tagChip
+                    }
+                    aria-pressed={on}
+                    title={
+                      on
+                        ? `${t.label}: excluded — click to allow`
+                        : `exclude ${t.label}`
+                    }
+                    onClick={() => setExcludedTags((m) => m ^ (1 << t.bit))}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </span>
+          </span>
+
+          <span className={styles.control}>
+            <label className="caps-label" htmlFor="qs-order">
+              Order
+            </label>
+            <select
+              id="qs-order"
+              className={`${styles.select} data`}
+              value={resultsSort}
+              onChange={(e) => setResultsSort(e.target.value as SortMode)}
+            >
+              <option value="best">best fit</option>
+              <option value="fewest-3s">fewest 3-letter slots</option>
+            </select>
+          </span>
+
+          {words.length === 0 && (
+            <span className={styles.control}>
+              <label className="caps-label" htmlFor="qs-maxwords">
+                Max words
+              </label>
+              <select
+                id="qs-maxwords"
+                className={`${styles.select} data`}
+                value={maxWords ?? ""}
+                onChange={(e) =>
+                  setMaxWords(e.target.value === "" ? null : Number(e.target.value))
+                }
+              >
+                <option value="">any</option>
+                {MAX_WORD_COUNTS[size].map((n) => (
+                  <option key={n} value={n}>
+                    ≤ {n}
+                  </option>
+                ))}
+              </select>
+              <label className="caps-label" htmlFor="qs-sort">
+                Sort
+              </label>
+              <select
+                id="qs-sort"
+                className={`${styles.select} data`}
+                value={sort}
+                onChange={(e) => setSort(e.target.value)}
+              >
+                <option value="popular">most used</option>
+                <option value="blocks">fewest blocks</option>
+                <option value="words">fewest words</option>
+              </select>
+            </span>
+          )}
         </div>
-      )}
+        {wordNote && <p className={styles.note}>{wordNote}</p>}
+        {revealer !== null &&
+          revealerMode === "center" &&
+          revealer.length % 2 !== size % 2 && (
+            <p className={styles.note}>
+              {revealer} ({revealer.length}) can&apos;t sit centered in a{" "}
+              {size}-wide grid — a centered slot here needs an odd-length
+              word.
+            </p>
+          )}
+        {excludedTags !== 0 && filtersStale && (
+          <p className={styles.note}>
+            fill engine build is stale — word-type filters are inactive; run
+            npm run build:wasm
+          </p>
+        )}
+        {excludedTags !== 0 && !filtersStale && tagsMissing && (
+          <p className={styles.note}>
+            word-type data unavailable — filters have no effect
+          </p>
+        )}
+
+        <div className={styles.statusLine}>
+          <span className="caps-label">
+            {!armed && "focus the form to load layouts"}
+            {engineStatus === "loading" && "loading engine…"}
+            {engineStatus === "error" && "fill engine unavailable"}
+            {engineStatus === "ready" &&
+              total !== null &&
+              `${total.toLocaleString()} published layout${total === 1 ? "" : "s"} match`}
+            {engineStatus === "ready" && scanning && " · ranking by fillability…"}
+          </span>
+        </div>
+
+        {engineStatus === "ready" && total === 0 && (
+          <p className={styles.note}>
+            {words.length > 0
+              ? `No published NYT ${size}×${size} layout fits your must-include words (lengths ${words
+                  .map((w) => w.word.length)
+                  .join(", ")}) — try fewer or different-length entries.`
+              : "No layouts in the library — run backend/scripts/build_layouts.py."}
+          </p>
+        )}
+
+        <ol className={styles.results}>
+          {rows.map((row) => {
+            const b = badge(row);
+            return (
+              <li key={row.rowKey}>
+                <button
+                  className={styles.resultRow}
+                  onClick={() => pick(row)}
+                  disabled={creating}
+                >
+                  <LayoutPreview
+                    pattern={row.layout.pattern}
+                    assignment={row.assignment}
+                    size={size === 21 ? 132 : 116}
+                  />
+                  <span className={styles.resultMeta}>
+                    <span className="data">
+                      {row.layout.word_count} words · {row.layout.block_count}{" "}
+                      blocks · used {row.layout.usage_count}×
+                    </span>
+                    <span className={`${styles.quiet} data`}>
+                      {row.threeCount} three-letter slot
+                      {row.threeCount === 1 ? "" : "s"}
+                      {row.layout.last_used && ` · last published ${row.layout.last_used}`}
+                    </span>
+                  </span>
+                  <span className={`${b.cls} caps-label`}>{b.text}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      </div>
     </section>
   );
 }

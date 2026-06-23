@@ -62,31 +62,31 @@ export default function GridsPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <h1 className="caps-label">Grids</h1>
-        <div className={styles.newGrid}>
-          <label className="caps-label" htmlFor="size">
-            Size
-          </label>
-          <select
-            id="size"
-            className={`${styles.sizeSelect} data`}
-            value={size}
-            onChange={(e) => setSize(Number(e.target.value))}
-          >
-            {Array.from({ length: 23 }, (_, i) => i + 3).map((n) => (
-              <option key={n} value={n}>
-                {n} × {n}
-              </option>
-            ))}
-          </select>
-          <button className={styles.newButton} onClick={create}>
-            New grid
-          </button>
-        </div>
-      </div>
+      <h1 className="caps-label">Grids</h1>
 
       <QuickStart />
+
+      <div className={styles.blankGrid}>
+        <span className={styles.blankLabel}>…or start a blank grid</span>
+        <label className="caps-label" htmlFor="size">
+          Size
+        </label>
+        <select
+          id="size"
+          className={`${styles.sizeSelect} data`}
+          value={size}
+          onChange={(e) => setSize(Number(e.target.value))}
+        >
+          {Array.from({ length: 23 }, (_, i) => i + 3).map((n) => (
+            <option key={n} value={n}>
+              {n} × {n}
+            </option>
+          ))}
+        </select>
+        <button className={styles.newButton} onClick={create}>
+          New grid
+        </button>
+      </div>
 
       {grids === null ? (
         <p className={styles.empty}>Loading…</p>

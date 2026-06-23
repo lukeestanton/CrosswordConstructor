@@ -10,8 +10,13 @@
 
 import type { FillClient, FillVerdict } from "../fill/client";
 import { getVerdict, setVerdict, verdictKey } from "../fill/verify";
-import type { Assignment, RevealerSpec } from "./placement";
-import { assignmentTemplate, enumerateAssignments, parsePattern } from "./placement";
+import type { Assignment, MustWord, RevealerSpec } from "./placement";
+import {
+  assignmentTemplate,
+  countThreeSlots,
+  enumerateMustInclude,
+  parsePattern,
+} from "./placement";
 
 export interface LayoutRow {
   id: number;
@@ -40,6 +45,10 @@ export interface RankedLayout {
   template: string;
   /** Higher = roomier fill; null until analyzed. */
   fillScore: number | null;
+  /** Length-3 slots in the layout (across + down) — layout-intrinsic. */
+  threeCount: number;
+  /** Stable React key: one layout can appear under several arrangements. */
+  rowKey: string;
 }
 
 export const CUTOFF = 50;
@@ -48,16 +57,36 @@ export const ANALYZE_LAYOUTS_BROWSE = 60;
 export const VERIFY_TOP = 24;
 export const VERIFY_STOP_AFTER = 12;
 export const VERIFY_TIMEOUT_MS = 800;
+/** Distinct word arrangements surfaced per layout (different placements of the
+ * must-include words on the same black-square pattern). */
+export const KEEP_PER_LAYOUT = 3;
 
-/** Sort: proven first, then by fill score, then by popularity. */
-export function compareRanked(a: RankedLayout, b: RankedLayout): number {
-  const tier = (r: RankedLayout) => (r.status === "proven" ? 0 : 1);
+/** Results ordering: "best" = fillability; "fewest-3s" = fewest 3-letter slots
+ * first (a quality proxy — more 3-slots ≈ a worse puzzle). */
+export type SortMode = "best" | "fewest-3s";
+
+const provenTier = (r: RankedLayout) => (r.status === "proven" ? 0 : 1);
+
+/** Proven first, then by fill score, then by popularity. */
+function compareBest(a: RankedLayout, b: RankedLayout): number {
   return (
-    tier(a) - tier(b) ||
+    provenTier(a) - provenTier(b) ||
     (b.fillScore ?? -1) - (a.fillScore ?? -1) ||
     b.layout.usage_count - a.layout.usage_count
   );
 }
+
+export function makeCompareRanked(
+  mode: SortMode,
+): (a: RankedLayout, b: RankedLayout) => number {
+  if (mode === "fewest-3s") {
+    return (a, b) => a.threeCount - b.threeCount || compareBest(a, b);
+  }
+  return compareBest;
+}
+
+/** Default comparator (fillability). */
+export const compareRanked = makeCompareRanked("best");
 
 function scoreFromAnalysis(slots: { options: number }[]): number {
   if (slots.length === 0) return 0;
@@ -73,7 +102,7 @@ function scoreFromAnalysis(slots: { options: number }[]): number {
 export async function rankLayouts(opts: {
   client: FillClient;
   layouts: LayoutRow[];
-  words: string[];
+  words: MustWord[];
   /** Verdict-cache fingerprint of the worker's ACTUAL filter state (same
    * "${mask}|" format as FillPanel's, so verdicts are legitimately shared
    * with the editor). Must describe what the worker really applies — a
@@ -82,64 +111,86 @@ export async function rankLayouts(opts: {
   /** Positional constraint for one of the words; layouts that can't host
    * it drop out via empty assignments. */
   revealer?: RevealerSpec;
+  /** Display order — also used to pick proof candidates. Defaults to "best". */
+  sortMode?: SortMode;
   isStale: () => boolean;
   onUpdate: (rows: RankedLayout[]) => void;
 }): Promise<void> {
   const { client, layouts, words, filterSig, revealer, isStale, onUpdate } = opts;
+  const sortMode = opts.sortMode ?? "best";
+  const compare = makeCompareRanked(sortMode);
   const cap = words.length > 0 ? ANALYZE_LAYOUTS_WITH_WORDS : ANALYZE_LAYOUTS_BROWSE;
-  const rows: RankedLayout[] = layouts.slice(0, cap).map((layout) => ({
-    layout,
-    status: "pending",
-    assignment: [],
-    template: layout.pattern,
-    fillScore: null,
-  }));
+
+  // Parse each layout once: reused for slot enumeration and the 3-slot count.
+  const prepared = layouts.slice(0, cap).map((layout) => {
+    const parsed = parsePattern(layout.pattern);
+    return { layout, parsed, threeCount: countThreeSlots(parsed) };
+  });
+
+  // Rows grouped per layout so one layout can expand to several arrangements.
+  // Mutating a row object updates it in place; `flat()` re-reads the same refs.
+  const perLayout: RankedLayout[][] = prepared.map(({ layout, threeCount }) => [
+    {
+      layout,
+      status: "pending",
+      assignment: [],
+      template: layout.pattern,
+      fillScore: null,
+      threeCount,
+      rowKey: `${layout.id}:pending`,
+    },
+  ]);
+  const flat = () => perLayout.flat();
   const emit = () => {
-    if (!isStale()) onUpdate(rows.filter((r) => r.status !== "dropped"));
+    if (!isStale()) onUpdate(flat().filter((r) => r.status !== "dropped"));
   };
   emit();
 
-  // --- analyze pass: best assignment + fill score per layout ---------------
-  for (const row of rows) {
+  // --- analyze pass: keep the top-K distinct arrangements per layout -------
+  for (let li = 0; li < prepared.length; li++) {
     if (isStale()) return;
-    const parsed = parsePattern(row.layout.pattern);
-    const assignments = enumerateAssignments(parsed, words, revealer);
-    if (assignments.length === 0) {
-      // Too few slots (signature matching should prevent that) or no
-      // placement satisfies the revealer constraint — silently dropped.
-      row.status = "dropped";
-      emit();
-      continue;
-    }
-    let best: { assignment: Assignment; template: string; score: number } | null =
-      null;
+    const { layout, parsed, threeCount } = prepared[li];
+    const assignments = enumerateMustInclude(parsed, words, revealer);
+    // Best score per distinct template (drop exact-duplicate placements).
+    const byTemplate = new Map<
+      string,
+      { assignment: Assignment; template: string; score: number }
+    >();
     for (const assignment of assignments) {
       if (isStale()) return;
-      const template = assignmentTemplate(row.layout.pattern, assignment);
+      const template = assignmentTemplate(layout.pattern, assignment);
       try {
         const analysis = await client.analyze(template, CUTOFF);
         if (analysis.contradiction) continue;
         const score = scoreFromAnalysis(analysis.slots);
-        if (!best || score > best.score) best = { assignment, template, score };
+        const prev = byTemplate.get(template);
+        if (!prev || score > prev.score) {
+          byTemplate.set(template, { assignment, template, score });
+        }
       } catch {
         /* worker reset — treat this assignment as unscored */
       }
     }
-    if (!best) {
-      row.status = "dropped";
-    } else {
-      row.status = "scored";
-      row.assignment = best.assignment;
-      row.template = best.template;
-      row.fillScore = best.score;
-    }
+    const kept = [...byTemplate.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, KEEP_PER_LAYOUT);
+    // Empty (no slots / revealer unmet / all contradictions) → layout drops out.
+    perLayout[li] = kept.map((k) => ({
+      layout,
+      status: "scored",
+      assignment: k.assignment,
+      template: k.template,
+      fillScore: k.score,
+      threeCount,
+      rowKey: `${layout.id}:${k.template}`,
+    }));
     emit();
   }
 
-  // --- proof pass: fill-search the most promising layouts ------------------
-  const candidates = rows
+  // --- proof pass: fill-search the most promising arrangements -------------
+  const candidates = flat()
     .filter((r) => r.status === "scored")
-    .sort(compareRanked)
+    .sort(compare)
     .slice(0, VERIFY_TOP);
   let proven = 0;
   for (const row of candidates) {

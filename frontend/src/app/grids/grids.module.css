@@ -2,16 +2,21 @@
   max-width: 46rem;
 }
 
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-}
-
-.newGrid {
+/* Demoted blank-grid action: quiet row beneath the Quick Start hero. */
+.blankGrid {
   display: flex;
   gap: var(--sp-3);
   align-items: baseline;
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-3);
+  border-top: var(--rule-hair);
+}
+
+.blankLabel {
+  margin-right: auto;
+  font-style: italic;
+  color: var(--ink-muted);
+  font-size: var(--fs-s);
 }
 
 .sizeSelect {
