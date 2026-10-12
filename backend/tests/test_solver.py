@@ -259,14 +259,15 @@ def test_sync_incremental_window(db_session):
     assert params_seen[-1]["date_start"] == (today - datetime.timedelta(days=30)).isoformat()
     assert params_seen[-1]["date_end"] == today.isoformat()
 
-    # With data: window starts the day after the latest synced date.
-    db_session.add(
-        Solve(puzzle_date=datetime.date(2026, 6, 2), solved=False, day_of_week=1)
-    )
+    # With data: window starts the day after the latest synced date. Relative
+    # to today so the range stays inside one 90-day list window (a fixed date
+    # eventually splits it, and the last call becomes the oldest window).
+    latest = today - datetime.timedelta(days=10)
+    db_session.add(Solve(puzzle_date=latest, solved=False, day_of_week=latest.weekday()))
     db_session.commit()
     with make_nyt_client(COOKIE, transport=httpx.MockTransport(handler)) as c:
         sync_incremental(db_session, c, sleep=lambda _: None)
-    assert params_seen[-1]["date_start"] == "2026-06-03"
+    assert params_seen[-1]["date_start"] == (latest + datetime.timedelta(days=1)).isoformat()
     assert params_seen[-1]["date_end"] == today.isoformat()
 
 

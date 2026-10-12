@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { duplicateGrid } from "@/lib/grid/duplicate";
 import { makeGridState } from "@/lib/grid/types";
 import { QuickStart } from "./QuickStart";
 import styles from "./grids.module.css";
@@ -19,6 +20,7 @@ interface GridSummary {
 export default function GridsPage() {
   const [grids, setGrids] = useState<GridSummary[] | null>(null);
   const [size, setSize] = useState(15);
+  const [duplicating, setDuplicating] = useState<number | null>(null);
   const router = useRouter();
 
   const load = useCallback(async () => {
@@ -53,6 +55,14 @@ export default function GridsPage() {
       const { id } = await res.json();
       router.push(`/grids/${id}`);
     }
+  }
+
+  async function duplicate(id: number) {
+    setDuplicating(id);
+    // The copy is the most recently touched grid, so it lands at the top.
+    await duplicateGrid(id);
+    await load();
+    setDuplicating(null);
   }
 
   async function remove(id: number) {
@@ -105,7 +115,15 @@ export default function GridsPage() {
               </span>
               <span className="data">draft {g.rev}</span>
               <button
-                className={`${styles.delete} caps-label`}
+                className={`${styles.action} caps-label`}
+                onClick={() => duplicate(g.id)}
+                disabled={duplicating !== null}
+                aria-label={`Duplicate grid ${g.title || g.id}`}
+              >
+                {duplicating === g.id ? "copying…" : "duplicate"}
+              </button>
+              <button
+                className={`${styles.action} caps-label`}
                 onClick={() => remove(g.id)}
                 aria-label={`Delete grid ${g.title || g.id}`}
               >
