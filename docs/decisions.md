@@ -389,3 +389,11 @@ a client-side "Order" control offers `best fit` (fillability, the default)
 and `fewest 3-letter slots` (`threeCount` asc, computed once per layout from
 the parsed pattern). Distinct from the browse-only backend `sort`
 (popularity/blocks/words), which only orders the server pre-filter pool.
+
+**Grid duplication is client-side.** The grid's title lives inside the
+payload (the editor's source of truth on load), and the backend treats the
+payload as opaque, so a server copy endpoint couldn't retitle the copy. The
+list page fetches the grid, sets the title to "<title> (copy)" ("untitled
+(copy)" if it had none), and POSTs it as a new grid. The copy keeps the full
+editor state (fill, clues, locks, filters) but **not** snapshots, and starts
+at draft 0.

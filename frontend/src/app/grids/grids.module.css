@@ -48,7 +48,7 @@
 
 .row {
   display: grid;
-  grid-template-columns: 4.5rem minmax(0, 1fr) 5.5rem 5rem auto;
+  grid-template-columns: 4.5rem minmax(0, 1fr) 5.5rem 5rem auto auto;
   gap: var(--sp-3);
   align-items: baseline;
   padding: var(--sp-3) 0;
@@ -67,12 +67,16 @@
   color: var(--ink-muted);
 }
 
-.delete {
+.action {
   color: var(--ink-muted);
 }
 
-.delete:hover {
+.action:hover:not(:disabled) {
   color: var(--accent);
+}
+
+.action:disabled {
+  cursor: default;
 }
 
 .empty {
